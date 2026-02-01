@@ -31,16 +31,17 @@ if "page" not in st.session_state:
 
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
-# --- CUSTOM CSS FOR DARK EDITOR (INVERT HACK) ---
+# --- AGGRESSIVE DARK MODE CSS ---
 st.markdown("""
     <style>
-        /* Since streamlit-quill is an iframe, we cannot style the inside directly.
-           The "filter: invert(1)" command turns white to black and black to white.
-           The "hue-rotate" tries to correct the colors of blue buttons so they don't look orange.
-        */
-        iframe[title="streamlit_quill.quill"] {
+        /* NUCLEAR OPTION: Target ANY iframe in the main area */
+        .stMain iframe {
             filter: invert(1) hue-rotate(180deg);
-            background-color: white; /* Needed for invert to have a base to work on */
+        }
+        
+        /* Optional: Re-invert images if they look weird inside the editor */
+        .stMain iframe img {
+            filter: invert(1) hue-rotate(180deg);
         }
     </style>
 """, unsafe_allow_html=True)
@@ -92,7 +93,7 @@ if st.session_state.page == "broken_mods":
         assignment = st.text_input("Assign to User")
         st.write("Description (Rich Text):")
         
-        # Text Editor (Inverted via CSS to look dark)
+        # Text Editor
         desc = st_quill(
             placeholder="Describe the issue...", 
             key="new_mod_desc",
