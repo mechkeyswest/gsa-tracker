@@ -7,13 +7,19 @@ from datetime import datetime
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 
 # --- SECURITY CONFIGURATION ---
-# ⚠️ CHANGE THIS PASSWORD IMMEDIATELY! ⚠️
+# AUTOMATICALLY GENERATED PASSWORD
 SYSTEM_PASSWORD = "001Arma!23" 
 
 # --- INITIALIZE STATE ---
 if "role_db" not in st.session_state:
     st.session_state.role_db = {
         "armasupplyguy@gmail.com": "SUPER_ADMIN"
+    }
+
+# We need a separate DB for passwords now that users can create accounts
+if "user_passwords" not in st.session_state:
+    st.session_state.user_passwords = {
+        "armasupplyguy@gmail.com": SYSTEM_PASSWORD
     }
 
 if "mods" not in st.session_state:
@@ -66,27 +72,56 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- LOGIN PAGE LOGIC ---
+# --- LOGIN & SIGN UP LOGIC ---
 if not st.session_state.logged_in:
-    st.title("🔒 Staff Portal Login")
+    st.title("🔒 Staff Portal Access")
     
-    col1, col2 = st.columns([1, 2])
-    with col1:
-        with st.container(border=True):
-            email_input = st.text_input("Email Address")
-            password_input = st.text_input("System Password", type="password")
-            
-            if st.button("Login", type="primary"):
-                if email_input in st.session_state.role_db:
-                    if password_input == SYSTEM_PASSWORD:
-                        st.session_state.logged_in = True
-                        st.session_state.current_user = email_input
-                        st.success("Login Successful!")
-                        st.rerun()
+    col_center = st.columns([1, 2, 1])
+    with col_center[1]:
+        login_tab, signup_tab = st.tabs(["🔑 Login", "📝 Create Account"])
+        
+        # --- TAB 1: LOGIN ---
+        with login_tab:
+            with st.container(border=True):
+                email_input = st.text_input("Email Address", key="login_email")
+                password_input = st.text_input("Password", type="password", key="login_pass")
+                
+                if st.button("Login", type="primary", use_container_width=True):
+                    # 1. Check if user exists
+                    if email_input in st.session_state.role_db:
+                        # 2. Verify Password
+                        stored_pass = st.session_state.user_passwords.get(email_input)
+                        if stored_pass == password_input:
+                            st.session_state.logged_in = True
+                            st.session_state.current_user = email_input
+                            st.success("Login Successful!")
+                            st.rerun()
+                        else:
+                            st.error("Incorrect Password.")
                     else:
-                        st.error("Incorrect Password.")
-                else:
-                    st.error("Access Denied. Email not authorized.")
+                        st.error("User not found. Please create an account.")
+
+        # --- TAB 2: SIGN UP ---
+        with signup_tab:
+            with st.container(border=True):
+                new_email = st.text_input("Enter Email", key="signup_email")
+                new_pass = st.text_input("Create Password", type="password", key="signup_pass")
+                confirm_pass = st.text_input("Confirm Password", type="password", key="signup_confirm")
+                
+                if st.button("Create Account", type="primary", use_container_width=True):
+                    if new_email and new_pass:
+                        if new_email in st.session_state.role_db:
+                            st.error("Account already exists. Please login.")
+                        elif new_pass != confirm_pass:
+                            st.error("Passwords do not match.")
+                        else:
+                            # Create User with Default Role "CLP"
+                            st.session_state.role_db[new_email] = "CLP"
+                            st.session_state.user_passwords[new_email] = new_pass
+                            st.success("Account created successfully! You can now login.")
+                    else:
+                        st.warning("Please fill in all fields.")
+
     st.stop()
 
 # =========================================================
@@ -235,13 +270,10 @@ elif st.session_state.page == "mod_detail":
             with st.container(border=True):
                 st.caption(f"Severity: {current_mod['severity']} | Assigned: {current_mod['assignment']}")
                 
-                # Check JSON data existence
                 if current_mod.get('json_data'):
                     st.code(current_mod['json_data'], language='json')
                 
-                # Render Description
                 st.markdown(current_mod['description'], unsafe_allow_html=True)
-                
                 st.divider()
                 
                 if not current_mod['complete']:
