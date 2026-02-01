@@ -12,16 +12,17 @@ from bs4 import BeautifulSoup
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 
 # --- SECURITY ---
-SYSTEM_PASSWORD = "001Arma!23" 
+SYSTEM_PASSWORD = st.secrets.get("SYSTEM_PASSWORD")
+SYSTEM_EMAIL = st.secrets.get("SYSTEM_EMAIL")
 DB_FILE = "portal_data.json"
 
 # --- DATABASE FUNCTIONS ---
 def load_db():
     if not os.path.exists(DB_FILE):
         default_data = {
-            "role_db": {"armasupplyguy@gmail.com": "SUPER_ADMIN"},
-            "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"},
-            "passwords": {"armasupplyguy@gmail.com": SYSTEM_PASSWORD},
+            "role_db": {SYSTEM_EMAIL: "SUPER_ADMIN"},
+            "usernames": {SYSTEM_EMAIL: "SYSTEM_ADMIN"},
+            "passwords": {SYSTEM_EMAIL: SYSTEM_PASSWORD},
             "mods": [],
             "projects": [],
             "events": [],
@@ -162,6 +163,29 @@ st.markdown("""
             animation: flash 2s infinite; padding: 10px; border: 1px solid #ff4b4b;
             border-radius: 5px; text-align: center; color: #ff9999; font-weight: bold; margin-bottom: 10px;
         }
+        /* Fix password toggle button to stay inside input (like shadcn) */
+        div[data-testid="stTextInput"] > div {
+            position: relative;
+        }
+        div[data-testid="stTextInput"] button[kind="icon"] {
+            position: absolute;
+            top: 0;
+            right: 0;
+            height: 100%;
+            padding: 0 0.75rem;
+            background: transparent !important;
+            border: none !important;
+            width: auto !important;
+            min-width: unset !important;
+        }
+        div[data-testid="stTextInput"] button[kind="icon"]:hover {
+            background: transparent !important;
+        }
+        div[data-testid="stTextInput"] button[kind="icon"] svg {
+            width: 1rem;
+            height: 1rem;
+            opacity: 0.5;
+        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -171,10 +195,15 @@ if not st.session_state.logged_in:
     col_center = st.columns([1, 2, 1])
     with col_center[1]:
         login_tab, signup_tab = st.tabs(["🔑 Login", "📝 Create Account"])
+        
         with login_tab:
             with st.container(border=True):
-                email = st.text_input("Email", key="log_email")
+                st.subheader("Welcome Back")
+                st.caption("Enter your credentials to access the portal")
+                st.divider()
+                email = st.text_input("Email", key="log_email", placeholder="you@example.com")
                 pwd = st.text_input("Password", type="password", key="log_pwd")
+                st.write("")
                 if st.button("Login", type="primary", use_container_width=True):
                     if email in DB['role_db'] and DB['passwords'].get(email) == pwd:
                         st.session_state.logged_in = True
@@ -182,12 +211,17 @@ if not st.session_state.logged_in:
                         st.success("Success!")
                         st.rerun()
                     else: st.error("Invalid credentials.")
+        
         with signup_tab:
             with st.container(border=True):
+                st.subheader("Create Account")
+                st.caption("Join the staff portal")
+                st.divider()
                 new_user = st.text_input("Username", key="sign_user")
-                new_email = st.text_input("New Email", key="sign_email")
-                new_pass = st.text_input("New Password", type="password", key="sign_pwd")
+                new_email = st.text_input("Email", key="sign_email", placeholder="you@example.com")
+                new_pass = st.text_input("Password", type="password", key="sign_pwd")
                 conf_pass = st.text_input("Confirm Password", type="password", key="sign_conf")
+                st.write("")
                 if st.button("Create Account", type="primary", use_container_width=True):
                     if new_email in DB['role_db']: st.error("Account exists.")
                     elif new_pass != conf_pass: st.error("Passwords mismatch.")
