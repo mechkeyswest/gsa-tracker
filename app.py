@@ -35,7 +35,6 @@ def load_db():
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
-            # Migrations
             if "usernames" not in data: data["usernames"] = {}
             if "mod_library" not in data: data["mod_library"] = []
             if "server_configs" not in data: data["server_configs"] = []
@@ -389,7 +388,9 @@ elif st.session_state.page == "json_editor":
                     if st.button("📂 Load Preset") and selected_conf != "Select...":
                         found = next((c for c in DB['server_configs'] if c['name'] == selected_conf), None)
                         if found:
+                            # IMPORTANT: Update both session state AND key value
                             st.session_state.editor_content = found['content']
+                            st.session_state.main_json_editor = found['content'] 
                             st.success(f"Loaded '{selected_conf}'!")
                             st.rerun()
                 
@@ -397,7 +398,6 @@ elif st.session_state.page == "json_editor":
                 with c_save:
                     new_conf_name = st.text_input("Save Current as...")
                     if st.button("💾 Save as Preset") and new_conf_name:
-                        # Remove existing with same name if exists (overwrite)
                         DB['server_configs'] = [c for c in DB['server_configs'] if c['name'] != new_conf_name]
                         DB['server_configs'].append({"name": new_conf_name, "content": st.session_state.editor_content})
                         save_db(DB)
@@ -413,6 +413,8 @@ elif st.session_state.page == "json_editor":
 
             st.divider()
             st.subheader("Active JSON Editor")
+            st.caption("Press 'Ctrl+A' then 'Ctrl+C' inside the box to copy everything.")
+            # Note: value=... is only used on first render. key=... binds it to session state.
             json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
             st.session_state.editor_content = json_text
 
@@ -464,6 +466,7 @@ elif st.session_state.page == "json_editor":
                                     else: new_s = "[\n" + snippet + "\n]"
                                 else: new_s = cur + ",\n" + snippet
                                 st.session_state.editor_content = new_s
+                                st.session_state.main_json_editor = new_s
                                 st.rerun()
 
             with tab_saved:
@@ -473,13 +476,17 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        st.write(f"**{mod['name']}**")
-                        mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
-                        st.code(json.dumps(mini_json, indent=4), language='json')
-                        
-                        c_ins, c_del = st.columns([3,1])
-                        with c_ins:
-                            if st.button("➕ Insert", key=f"ins_{mod['modId']}"):
+                        # CONDENSED VIEW
+                        c_info, c_add, c_del = st.columns([5, 1, 1])
+                        with c_info:
+                            st.write(f"**{mod['name']}**")
+                            # QUICK COPY AREA
+                            mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                            st.code(json.dumps(mini_json, indent=4), language='json')
+
+                        with c_add:
+                            st.write("") # Spacer
+                            if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor"):
                                 snippet = json.dumps(mini_json, indent=4)
                                 cur = st.session_state.editor_content.strip()
                                 if not cur: cur = "[]"
@@ -488,9 +495,11 @@ elif st.session_state.page == "json_editor":
                                     else: new_s = "[\n" + snippet + "\n]"
                                 else: new_s = cur + ",\n" + snippet
                                 st.session_state.editor_content = new_s
+                                st.session_state.main_json_editor = new_s
                                 st.rerun()
                         with c_del:
-                            if st.button("🗑️", key=f"rm_{mod['modId']}"):
+                            st.write("") # Spacer
+                            if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library"):
                                 idx = DB['mod_library'].index(mod)
                                 DB['mod_library'].pop(idx)
                                 save_db(DB)
