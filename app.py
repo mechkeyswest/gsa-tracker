@@ -14,10 +14,10 @@ DB_FILE = "portal_data.json"
 
 # --- DATABASE FUNCTIONS (PERSISTENCE) ---
 def load_db():
-    # If file doesn't exist, create default
     if not os.path.exists(DB_FILE):
         default_data = {
             "role_db": {"armasupplyguy@gmail.com": "SUPER_ADMIN"},
+            "usernames": {"armasupplyguy@gmail.com": "ArmaSupplyGuy"}, # Default Username
             "passwords": {"armasupplyguy@gmail.com": SYSTEM_PASSWORD},
             "mods": [],
             "events": [],
@@ -28,18 +28,20 @@ def load_db():
             json.dump(default_data, f)
         return default_data
     
-    # If file exists, load it
     try:
         with open(DB_FILE, 'r') as f:
-            return json.load(f)
+            data = json.load(f)
+            # Migration check: Ensure 'usernames' exists for old databases
+            if "usernames" not in data:
+                data["usernames"] = {}
+            return data
     except json.JSONDecodeError:
-        return {} # Handle corrupt file
+        return {} 
 
 def save_db(data):
     with open(DB_FILE, 'w') as f:
         json.dump(data, f, indent=4)
 
-# Load Data at start of every run
 DB = load_db()
 
 # --- LOCAL SESSION STATE ---
@@ -93,28 +95,33 @@ if not st.session_state.logged_in:
 
         with signup_tab:
             with st.container(border=True):
+                # NEW FIELD: USERNAME
+                new_user = st.text_input("Username", key="sign_user")
                 new_email = st.text_input("New Email", key="sign_email")
                 new_pass = st.text_input("New Password", type="password", key="sign_pwd")
                 conf_pass = st.text_input("Confirm Password", type="password", key="sign_conf")
+                
                 if st.button("Create Account", type="primary", use_container_width=True):
                     if new_email in DB['role_db']:
                         st.error("Account exists.")
                     elif new_pass != conf_pass:
                         st.error("Passwords mismatch.")
-                    elif new_email and new_pass:
-                        # UPDATE AND SAVE TO FILE
+                    elif new_email and new_pass and new_user:
                         DB['role_db'][new_email] = "staff"
                         DB['passwords'][new_email] = new_pass
+                        DB['usernames'][new_email] = new_user # Save Username
                         save_db(DB) 
                         st.success("Account created! Please login.")
                     else:
-                        st.warning("Fill all fields.")
+                        st.warning("All fields (including Username) are required.")
     st.stop()
 
 # =========================================================
 #  MAIN APP
 # =========================================================
 USER_EMAIL = st.session_state.current_user
+# Fallback for legacy users who might not have a username set
+USER_NAME = DB['usernames'].get(USER_EMAIL, USER_EMAIL.split('@')[0])
 user_role = DB['role_db'].get(USER_EMAIL, "staff")
 
 def navigate_to(page, mod_id=None):
@@ -127,7 +134,7 @@ def get_mod_status():
 
 # --- SIDEBAR ---
 st.sidebar.title("🛠 Staff Portal")
-st.sidebar.write(f"User: **{USER_EMAIL}**")
+st.sidebar.write(f"User: **{USER_NAME}**") # Show Username, not email
 if st.sidebar.button("🚪 Logout"):
     st.session_state.logged_in = False
     st.rerun()
@@ -175,7 +182,7 @@ if st.session_state.page == "view_announcements":
             if st.button("Post"):
                 DB['announcements'].insert(0, {
                     "date": datetime.now().strftime("%Y-%m-%d"),
-                    "title": title, "content": content, "author": USER_EMAIL
+                    "title": title, "content": content, "author": USER_NAME
                 })
                 save_db(DB)
                 st.success("Posted!")
@@ -262,7 +269,7 @@ elif st.session_state.page == "mod_detail":
                 txt = st.text_input("Message")
                 if st.form_submit_button("Send") and txt:
                     m.setdefault('discussion', []).append({
-                        "user": USER_EMAIL, "text": txt, "time": str(datetime.now())
+                        "user": USER_NAME, "text": txt, "time": str(datetime.now())
                     })
                     save_db(DB)
                     st.rerun()
@@ -313,14 +320,23 @@ elif st.session_state.page == "view_tutorials":
             st.subheader(t['title'])
             st.markdown(t['content'], unsafe_allow_html=True)
 
+# --- VIEW USERS (UPDATED: USERNAMES & PRIVACY) ---
 elif st.session_state.page == "view_users":
-    st.title("User Roster")
+    st.title("Staff Roster")
     for email, role in DB['role_db'].items():
         with st.container(border=True):
             c1, c2, c3 = st.columns([1,4,2])
+            
+            # 1. Get Username (Default to 'Unknown' if missing)
+            u_name = DB.get('usernames', {}).get(email, "Unknown User")
+            
             with c1: st.write("👤")
             with c2: 
-                st.subheader(email)
+                # 2. Show Username Main
+                st.subheader(u_name)
+                # 3. Restrict Email Visibility
+                if user_role == "SUPER_ADMIN":
+                    st.caption(f"Email: {email}") # Only Super Admin sees this
                 st.caption(f"Role: {role}")
             with c3:
                 st.write("🟢 Online" if email == USER_EMAIL else "⚪ Offline")
