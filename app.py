@@ -6,7 +6,7 @@ from datetime import datetime
 # --- CONFIG & SESSIONS ---
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 
-# Mock User Login (In a real app, use Streamlit Authenticator)
+# Mock User Login
 USER_EMAIL = "armasupplyguy@gmail.com"
 
 if "role_db" not in st.session_state:
@@ -31,23 +31,37 @@ if "page" not in st.session_state:
 
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
-# --- CUSTOM CSS FOR DARK EDITOR ---
+# --- CUSTOM CSS FOR DARK GREY EDITOR ---
 st.markdown("""
     <style>
-        /* Target the Quill editor container */
+        /* Force the background of the editor wrapper */
         .stQuill {
             background-color: #333333 !important;
-            color: white !important;
             border-radius: 5px;
         }
-        /* Style the toolbar to be dark grey */
-        .ql-toolbar {
-            background-color: #444444 !important;
-            border-color: #555555 !important;
+        
+        /* Toolbar Styling */
+        .ql-toolbar.ql-snow {
+            background-color: #222222 !important;
+            border: 1px solid #444444 !important;
             border-top-left-radius: 5px;
             border-top-right-radius: 5px;
         }
-        /* Ensure toolbar icons are visible */
+        
+        /* Editor Area Styling */
+        .ql-container.ql-snow {
+            background-color: #333333 !important;
+            border: 1px solid #444444 !important;
+            color: #ffffff !important;
+        }
+
+        /* Input Text Color */
+        .ql-editor {
+            color: #ffffff !important;
+            background-color: #333333 !important;
+        }
+
+        /* Icon & Picker colors for Dark Theme */
         .ql-snow .ql-stroke {
             stroke: #ffffff !important;
         }
@@ -57,14 +71,11 @@ st.markdown("""
         .ql-snow .ql-picker {
             color: #ffffff !important;
         }
-        /* Container borders */
-        .ql-container {
-            border-color: #555555 !important;
-            background-color: #333333 !important;
-        }
-        /* Text color inside editor */
-        .ql-editor {
-            color: white !important;
+        
+        /* Placeholder Color */
+        .ql-editor.ql-blank::before {
+            color: #aaaaaa !important;
+            font-style: italic;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -109,7 +120,7 @@ if st.session_state.page == "broken_mods":
     with st.expander("➕ Report New Broken Mod"):
         name = st.text_input("Mod Name")
         
-        # New Field: JSON Code Spot
+        # JSON Code Spot
         mod_json = st.text_area("Mod JSON Code", help="Paste JSON configuration here", height=100)
         
         severity = st.select_slider("Severity", options=range(1, 11))
@@ -141,14 +152,13 @@ if st.session_state.page == "broken_mods":
             with col1:
                 st.subheader(f"{'✅' if mod['complete'] else '❌'} {mod['name']}")
                 
-                # Display JSON Code field if it exists
+                # Display JSON Code
                 if mod.get('json_data'):
                     st.code(mod['json_data'], language='json')
                 
                 st.markdown(mod['description'], unsafe_allow_html=True)
                 st.caption(f"Assigned to: {mod['assignment']} | Severity: {mod['severity']}")
             with col2:
-                # Update completion status
                 is_done = st.checkbox("Complete", value=mod['complete'], key=f"check_{i}")
                 if is_done != mod['complete']:
                     st.session_state.mods[i]['complete'] = is_done
@@ -192,3 +202,22 @@ elif st.session_state.page == "tutorials":
         with st.expander("📝 Create New Tutorial"):
             t_title = st.text_input("Tutorial Title")
             t_content = st_quill(key="tut_quill")
+            if st.button("Save Tutorial"):
+                st.session_state.tutorials.append({"title": t_title, "content": t_content})
+                st.rerun()
+    
+    for tut in st.session_state.tutorials:
+        with st.container(border=True):
+            st.subheader(tut['title'])
+            st.markdown(tut['content'], unsafe_allow_html=True)
+
+# --- PAGE: ROLE MANAGEMENT ---
+elif st.session_state.page == "roles":
+    st.title("Super Admin: Role Management")
+    new_email = st.text_input("User Email")
+    new_role = st.selectbox("Assign Role", ["admin", "CLPLEAD", "CLP"])
+    if st.button("Update Role"):
+        st.session_state.role_db[new_email] = new_role
+        st.success(f"Updated {new_email} to {new_role}")
+    
+    st.table(pd.DataFrame(st.session_state.role_db.items(), columns=["Email", "Role"]))
