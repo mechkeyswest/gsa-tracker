@@ -1,131 +1,180 @@
-import streamlit as st
-import sqlite3
-from datetime import datetime, date, timedelta
-from streamlit_quill import st_quill 
+import React, { useState } from 'react';
+import ReactQuill from 'react-quill';
+import 'react-quill/dist/quill.snow.css';
+import { 
+  ShieldAlert, Calendar, BookOpen, CheckCircle2, 
+  Circle, ChevronRight, LayoutDashboard, Settings 
+} from 'lucide-react';
 
-# --- 1. DATABASE ---
-conn = sqlite3.connect('gsa_master_v8.db', check_same_thread=False)
-c = conn.cursor()
-c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)')
-c.execute('CREATE TABLE IF NOT EXISTS mods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, photo_url TEXT, severity INTEGER, assigned_to TEXT, details TEXT, is_done INTEGER)')
-c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)')
-c.execute('CREATE TABLE IF NOT EXISTS events (date_val TEXT PRIMARY KEY, time_val TEXT, location TEXT, type TEXT)')
-conn.commit()
+// --- CONFIG & THEME ---
+const SUPER_ADMIN = "armasupplyguy@gmail.com";
 
-# --- 2. SESSION STATE ---
-if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "view" not in st.session_state: st.session_state.view = "HOME"
-if "active_mod_id" not in st.session_state: st.session_state.active_mod_id = None
-if "sel_date" not in st.session_state: st.session_state.sel_date = str(date.today())
+const App = () => {
+  const [currentUser] = useState({ email: "armasupplyguy@gmail.com", role: "SUPER_ADMIN" });
+  const [activeTab, setActiveTab] = useState('broken-mods');
+  
+  // --- STATE FOR DATA ---
+  const [mods, setMods] = useState([
+    { id: 1, name: "ACE Medical Bug", photo: "", severity: 8, assigned: "John Doe", completed: false, description: "" }
+  ]);
 
-# --- 3. THE "FIXED" CSS (No Overlap Build) ---
-st.set_page_config(page_title="GSA COMMAND", layout="wide")
+  const [events, setEvents] = useState([]);
+  
+  // --- CALCULATE SIDEBAR LIGHT ---
+  const modStatusColor = mods.some(m => !m.completed) ? "text-red-500" : "text-green-500";
 
-st.markdown("""
-<style>
-    /* Global Pitch Black Theme */
-    .stApp { background-color: #0b0c0e; }
-    [data-testid="stSidebar"] { 
-        background-color: #000000 !important; 
-        border-right: 1px solid #1e1e1e !important; 
-        width: 260px !important;
-    }
-    
-    /* Force Clean Spacing */
-    .block-container { padding: 1rem 2rem !important; }
-    div[data-testid="stVerticalBlock"] { gap: 0rem !important; }
-    * { border-radius: 0px !important; font-family: 'Inter', sans-serif !important; }
+  return (
+    <div className="flex h-screen bg-slate-900 text-slate-100 font-sans">
+      {/* SIDEBAR */}
+      <aside className="w-64 bg-slate-950 border-r border-slate-800 flex flex-col">
+        <div className="p-6 font-bold text-xl tracking-tight border-b border-slate-800">
+          STAFF PORTAL
+        </div>
+        
+        <nav className="flex-1 p-4 space-y-8">
+          {/* SERVER ADMIN CATEGORY */}
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase mb-4 px-2">Server Admin</h3>
+            <button 
+              onClick={() => setActiveTab('broken-mods')}
+              className={`flex items-center w-full p-2 rounded transition ${activeTab === 'broken-mods' ? 'bg-slate-800 text-white' : 'hover:bg-slate-900 text-slate-400'}`}
+            >
+              <div className={`mr-3 ${modStatusColor}`}>
+                <Circle size={12} fill="currentColor" />
+              </div>
+              Broken Mods
+            </button>
+          </div>
 
-    /* Fix the Grey Section Headers - No Overlapping */
-    .sidebar-section {
-        background-color: #2b2d31 !important;
-        color: #ffffff !important;
-        padding: 8px 15px !important;
-        font-weight: 800 !important;
-        font-size: 11px !important;
-        letter-spacing: 1px !important;
-        text-transform: uppercase !important;
-        display: block !important;
-        margin: 10px 0px 5px 0px !important;
-        width: 100% !important;
-    }
+          {/* CLP LEAD CATEGORY */}
+          <div>
+            <h3 className="text-xs font-semibold text-slate-500 uppercase mb-4 px-2">CLP LEAD</h3>
+            <div className="space-y-1">
+              <button 
+                onClick={() => setActiveTab('events')}
+                className={`flex items-center w-full p-2 rounded transition ${activeTab === 'events' ? 'bg-slate-800 text-white' : 'hover:bg-slate-900 text-slate-400'}`}
+              >
+                <Calendar size={18} className="mr-3" /> Events
+              </button>
+              <button 
+                onClick={() => setActiveTab('tutorials')}
+                className={`flex items-center w-full p-2 rounded transition ${activeTab === 'tutorials' ? 'bg-slate-800 text-white' : 'hover:bg-slate-900 text-slate-400'}`}
+              >
+                <BookOpen size={18} className="mr-3" /> Tutorials
+              </button>
+            </div>
+          </div>
+        </nav>
 
-    /* Flat Sidebar Buttons - Fixed Spacing */
-    .stButton>button {
-        width: 100% !important;
-        background-color: transparent !important;
-        border: none !important;
-        color: #949ba4 !important;
-        text-align: left !important;
-        padding: 10px 18px !important;
-        font-size: 12px !important;
-        font-weight: 600 !important;
-        min-height: 40px !important;
-        display: flex !important;
-        align-items: center !important;
-    }
+        <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
+          Logged in as: <br/> <span className="text-slate-300">{currentUser.email}</span>
+        </div>
+      </aside>
 
-    /* Selection/Hover Highlight - Pinned to Left */
-    .stButton>button:hover, .stButton>button:focus {
-        color: #ffffff !important;
-        background-color: #1e1f22 !important;
-        border-left: 3px solid #5865f2 !important;
-        box-shadow: none !important;
-    }
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 overflow-y-auto p-8">
+        {activeTab === 'broken-mods' && <BrokenModsView mods={mods} setMods={setMods} />}
+        {activeTab === 'events' && <EventsView events={events} setEvents={setEvents} />}
+        {activeTab === 'tutorials' && <TutorialsView />}
+      </main>
+    </div>
+  );
+};
 
-    /* UI Containers */
-    .chat-box { background: #111214; border-left: 2px solid #5865f2; padding: 10px; margin-bottom: 4px; font-size: 12px; }
-    .roster-card { background: #000; border: 1px solid #1e1e1e; padding: 10px; margin-bottom: 2px; }
-</style>
-""", unsafe_allow_html=True)
+// --- SUB-COMPONENTS ---
 
-# --- 4. AUTHENTICATION ---
-if not st.session_state.logged_in:
-    _, col, _ = st.columns([1, 1, 1])
-    with col:
-        st.markdown("<h3 style='text-align:center; color:#5865f2;'>GSA HQ</h3>", unsafe_allow_html=True)
-        le, lp = st.text_input("EMAIL").lower().strip(), st.text_input("PASSWORD", type="password")
-        if st.button("LOG IN"):
-            user = c.execute("SELECT username FROM users WHERE email=? AND password=?", (le, lp)).fetchone()
-            if user:
-                st.session_state.update({"logged_in": True, "user": user[0]})
-                st.rerun()
-            elif le == "armasupplyguy@gmail.com": 
-                c.execute("INSERT OR IGNORE INTO users VALUES (?,?,'SUPPLY','Admin','Approved')", (le, lp))
-                conn.commit(); st.info("Root Admin Set. Log in.")
-    st.stop()
+const BrokenModsView = ({ mods, setMods }) => {
+  const addMod = () => {
+    const newMod = { id: Date.now(), name: "", severity: 1, completed: false, description: "" };
+    setMods([...mods, newMod]);
+  };
 
-# --- 5. SIDEBAR (The Clean Fixed Menu) ---
-with st.sidebar:
-    st.markdown("<h4 style='color:#5865f2; margin: 15px 0 0 16px; font-weight:900;'>GSA HQ</h4>", unsafe_allow_html=True)
-    st.markdown(f"<p style='color:#4e5058; font-size:9px; margin: -5px 0 20px 16px;'>OPERATOR: {st.session_state.user.upper()}</p>", unsafe_allow_html=True)
-    
-    st.markdown('<div class="sidebar-section">SERVER ADMIN</div>', unsafe_allow_html=True)
-    if st.button("NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
-    for mid, mname in c.execute("SELECT id, name FROM mods WHERE is_done=0").fetchall():
-        if st.button(mname.upper(), key=f"m_{mid}"):
-            st.session_state.active_mod_id, st.session_state.view = mid, "MOD_VIEW"; st.rerun()
-    
-    st.markdown('<div class="sidebar-section">CLP LEADS</div>', unsafe_allow_html=True)
-    if st.button("TRAINING ROSTER"): st.session_state.view = "CALENDAR"; st.rerun()
-    
-    st.markdown('<div class="sidebar-section">ARCHIVE</div>', unsafe_allow_html=True)
-    for aid, aname in c.execute("SELECT id, name FROM mods WHERE is_done=1").fetchall():
-        if st.button(f"✓ {aname.upper()}", key=f"a_{aid}"):
-            st.session_state.active_mod_id, st.session_state.view = aid, "MOD_VIEW"; st.rerun()
+  const updateMod = (id, field, value) => {
+    setMods(mods.map(m => m.id === id ? { ...m, [field]: value } : m));
+  };
 
-    st.markdown("<div style='margin-top: 50px;'></div>", unsafe_allow_html=True)
-    if st.button("DISCONNECT"): st.session_state.logged_in = False; st.rerun()
+  return (
+    <div className="max-w-4xl mx-auto">
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-3xl font-bold">Broken Mods List</h2>
+        <button onClick={addMod} className="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded">Add Mod Task</button>
+      </div>
 
-# --- 6. VIEWS ---
-view = st.session_state.view
+      <div className="space-y-6">
+        {mods.map(mod => (
+          <div key={mod.id} className="bg-slate-800 p-6 rounded-xl border border-slate-700">
+            <div className="grid grid-cols-2 gap-4 mb-4">
+              <div>
+                <label className="block text-sm text-slate-400 mb-1">Mod Name</label>
+                <input 
+                  type="text" 
+                  className="w-full bg-slate-900 border border-slate-700 p-2 rounded"
+                  value={mod.name}
+                  onChange={(e) => updateMod(mod.id, 'name', e.target.value)}
+                />
+              </div>
+              <div className="flex items-end space-x-4">
+                <div className="flex-1">
+                  <label className="block text-sm text-slate-400 mb-1">Severity (1-10): {mod.severity}</label>
+                  <input 
+                    type="range" min="1" max="10" 
+                    className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer"
+                    value={mod.severity}
+                    onChange={(e) => updateMod(mod.id, 'severity', e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center">
+                   <input 
+                    type="checkbox" 
+                    className="w-6 h-6 rounded border-slate-700 bg-slate-900 text-green-500 focus:ring-0"
+                    checked={mod.completed}
+                    onChange={(e) => updateMod(mod.id, 'completed', e.target.checked)}
+                   />
+                   <span className="ml-2 text-sm text-slate-400">Complete</span>
+                </div>
+              </div>
+            </div>
 
-if view == "CALENDAR":
-    st.markdown("### TRAINING ROSTER")
-    col_l, col_r = st.columns([1.5, 1], gap="medium")
-    with col_l:
-        for i in range(12):
-            curr = date.today() + timedelta(days=i)
-            ev = c.execute("SELECT type FROM events WHERE date_val=?", (str(curr),)).fetchone()
-            st.markdown(f'<div class="roster-card"><b style="color:#43b581;">{curr.strftime("%A, %b %d")}</b><br>'
-                        f'<small style="color:#888;">{ev[0] if ev else "EMPTY"
+            <label className="block text-sm text-slate-400 mb-2">Detailed Notes (Rich Text)</label>
+            <div className="bg-white text-black rounded">
+              <ReactQuill theme="snow" value={mod.description} onChange={(val) => updateMod(mod.id, 'description', val)} />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const EventsView = ({ events, setEvents }) => {
+  return (
+    <div className="max-w-4xl mx-auto">
+      <h2 className="text-3xl font-bold mb-8">CLP Events Calendar</h2>
+      <div className="bg-slate-800 p-8 rounded-xl border border-dashed border-slate-600 text-center">
+        <p className="text-slate-400 mb-4">Event Creation Form for CLP LEADS</p>
+        <div className="grid grid-cols-2 gap-4 text-left">
+           <input placeholder="Event Name" className="bg-slate-900 p-2 border border-slate-700 rounded"/>
+           <input type="datetime-local" className="bg-slate-900 p-2 border border-slate-700 rounded text-white"/>
+           <select className="bg-slate-900 p-2 border border-slate-700 rounded">
+             <option>EST</option><option>GMT</option><option>PST</option>
+           </select>
+           <input placeholder="Location (Server IP/Discord)" className="bg-slate-900 p-2 border border-slate-700 rounded"/>
+        </div>
+        <div className="mt-4 bg-white text-black rounded text-left">
+           <ReactQuill placeholder="Event Description..." />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const TutorialsView = () => (
+  <div className="max-w-4xl mx-auto">
+    <h2 className="text-3xl font-bold mb-8">Tutorials</h2>
+    <div className="bg-white text-black rounded min-h-[400px]">
+       <ReactQuill theme="snow" placeholder="Write your tutorial here..." />
+    </div>
+  </div>
+);
+
+export default App;
