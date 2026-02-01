@@ -5,12 +5,11 @@ import base64
 from io import BytesIO
 from PIL import Image
 
-# --- 1. DATABASE SETUP (V6 - Supporting Images in Project Details) ---
+# --- 1. DATABASE SETUP (V6) ---
 conn = sqlite3.connect('gsa_gemini_v6.db', check_same_thread=False)
 c = conn.cursor()
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE)')
-# Added 'image_data' to the projects table
 c.execute('''CREATE TABLE IF NOT EXISTS projects 
              (id INTEGER PRIMARY KEY, category TEXT, title TEXT, details TEXT, 
               assigned_user TEXT, is_done INTEGER, importance TEXT, image_data TEXT)''')
@@ -32,13 +31,12 @@ st.markdown("""
     .dot-Medium   { background-color: #00d4ff; box-shadow: 0 0 10px #00d4ff; } 
     .dot-Low      { background-color: #4b89ff; box-shadow: 0 0 10px #4b89ff; }
 
-    /* Persistent Sidebar Button */
+    /* Persistent Sidebar Buttons */
     .stButton>button {
         border-radius: 12px !important;
         background-color: #333537 !important;
         border: 1px solid #444746 !important;
         color: #e3e3e3 !important;
-        font-weight: 500 !important;
     }
     .stButton>button:hover { border-color: #a8c7fa !important; color: #a8c7fa !important; }
 </style>
@@ -50,7 +48,7 @@ def img_to_base64(image):
     image.save(buffered, format="PNG")
     return base64.b64encode(buffered.getvalue()).decode()
 
-# --- 4. AUTHENTICATION ---
+# --- 4. NAVIGATION & AUTH ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
 if "view" not in st.session_state: st.session_state.view = "home"
 
@@ -60,36 +58,38 @@ if not st.session_state.logged_in:
         st.markdown("<h2 style='text-align:center; margin-top:80px;'>GSA Workspace</h2>", unsafe_allow_html=True)
         t1, t2 = st.tabs(["SIGN IN", "REGISTER"])
         with t1:
-            le = st.text_input("Email", key="l_email")
-            lp = st.text_input("Password", type="password", key="l_pass")
-            if st.button("Unlock"):
+            le = st.text_input("Email", key="login_email")
+            lp = st.text_input("Password", type="password", key="login_pass")
+            if st.button("Unlock Dashboard"):
                 res = c.execute("SELECT username FROM users WHERE email=? AND password=?", (le, lp)).fetchone()
                 if res: 
                     st.session_state.logged_in, st.session_state.user_name = True, res[0]
                     st.rerun()
         with t2:
-            nu, ne, np = st.text_input("Name"), st.text_input("Email", key="r_email"), st.text_input("Pass", type="password")
-            if st.button("Create Account"):
-                c.execute("INSERT INTO users VALUES (?,?,?)", (ne, np, nu)); conn.commit(); st.success("Done!")
+            nu = st.text_input("Username", key="reg_user")
+            ne = st.text_input("Email", key="reg_email")
+            np = st.text_input("Password", type="password", key="reg_pass")
+            if st.button("Initialize Identity"):
+                c.execute("INSERT INTO users VALUES (?,?,?)", (ne, np, nu)); conn.commit(); st.success("Identity Created.")
     st.stop()
 
-# --- 5. SIDEBAR (PERSISTENT BUTTONS) ---
+# --- 5. SIDEBAR (PERSISTENT NAVIGATION) ---
 with st.sidebar:
     st.markdown(f"### ✨ {st.session_state.user_name}")
     
-    # PERSISTENT CREATE TASK BUTTON
-    if st.button("＋ Create New Task", use_container_width=True, type="primary"):
-        st.session_state.view = "create_project"
-        st.rerun()
+    # ALWAYS VISIBLE ACTIONS
+    if st.button("＋ Create New Task", use_container_width=True):
+        st.session_state.view = "create_project"; st.rerun()
     
     if st.button("🏠 Home", use_container_width=True):
-        st.session_state.view = "home"
-        st.rerun()
+        st.session_state.view = "home"; st.rerun()
         
     st.divider()
+    st.caption("CATEGORIES")
+    
     cats = [r[0] for r in c.execute("SELECT name FROM categories").fetchall()]
     for cat in cats:
-        with st.expander(f"📁 {cat}", expanded=True):
+        with st.expander(f"{cat}", expanded=True):
             projs = c.execute("SELECT id, title, importance FROM projects WHERE category=?", (cat,)).fetchall()
             for pid, ptitle, pimp in projs:
                 dot_class = f"dot-{pimp}"
@@ -98,12 +98,32 @@ with st.sidebar:
                 if col_txt.button(ptitle, key=f"nav_{pid}", use_container_width=True):
                     st.session_state.active_id, st.session_state.view = pid, "view_project"; st.rerun()
     
-    if st.button("＋ New Category", use_container_width=True): st.session_state.view = "create_cat"; st.rerun()
+    st.divider()
+    # FIXED: Added rerun here to ensure the view changes immediately
+    if st.button("＋ Manage Categories", use_container_width=True): 
+        st.session_state.view = "create_cat"; st.rerun()
 
 # --- 6. PAGE VIEWS ---
+
+# VIEW: HOME
 if st.session_state.view == "home":
     st.markdown("<h1 style='font-size: 3.5rem; font-weight:400; margin-top:60px;'>How can I help you?</h1>", unsafe_allow_html=True)
 
+# VIEW: CREATE CATEGORY (FIXED)
+elif st.session_state.view == "create_cat":
+    st.markdown("<h2>New Category</h2>", unsafe_allow_html=True)
+    with st.container(border=True):
+        nc = st.text_input("Category Name", placeholder="e.g. Marketing, Engineering")
+        col_a, col_b = st.columns(2)
+        if col_a.button("Save Category", use_container_width=True):
+            if nc:
+                c.execute("INSERT OR IGNORE INTO categories VALUES (?)", (nc,))
+                conn.commit()
+                st.session_state.view = "home"; st.rerun()
+        if col_b.button("Cancel", use_container_width=True, key="cancel_cat"):
+            st.session_state.view = "home"; st.rerun()
+
+# VIEW: CREATE PROJECT (WITH IMAGE)
 elif st.session_state.view == "create_project":
     st.markdown("<h2>Initiate New Task</h2>", unsafe_allow_html=True)
     users = [r[0] for r in c.execute("SELECT username FROM users").fetchall()]
@@ -115,26 +135,27 @@ elif st.session_state.view == "create_project":
         p_user = st.selectbox("Assign Responsibility", users)
         p_imp = st.select_slider("Importance", options=["Low", "Medium", "High", "Critical"])
         p_details = st.text_area("Details & Documentation")
+        p_img = st.file_uploader("Attach Reference Image", type=['png','jpg','jpeg'])
         
-        # IMAGE UPLOAD IN TASK CREATION
-        p_img = st.file_uploader("Attach Reference Image (or Paste)", type=['png','jpg','jpeg'])
-        
-        if st.button("Initialize Project"):
+        col_c, col_d = st.columns(2)
+        if col_c.button("Initialize Project", use_container_width=True):
             b64_img = img_to_base64(Image.open(p_img)) if p_img else None
             c.execute("INSERT INTO projects (category, title, details, assigned_user, is_done, importance, image_data) VALUES (?,?,?,?,0,?,?)", 
                       (p_cat, p_title, p_details, p_user, p_imp, b64_img))
             conn.commit(); st.session_state.view = "home"; st.rerun()
+        if col_d.button("Cancel", use_container_width=True, key="cancel_proj"):
+            st.session_state.view = "home"; st.rerun()
 
+# VIEW: PROJECT DETAILS & CHAT
 elif st.session_state.view == "view_project":
     p = c.execute("SELECT * FROM projects WHERE id=?", (st.session_state.active_id,)).fetchone()
     if p:
         col_main, col_chat = st.columns([2, 1], gap="large")
         with col_main:
             st.markdown(f"<h1>{p[2]}</h1>", unsafe_allow_html=True)
-            st.markdown(f"<p style='color:#a8c7fa;'>{p[1]} • Assigned to {p[4]}</p>", unsafe_allow_html=True)
+            st.markdown(f"<p style='color:#a8c7fa;'>📂 {p[1]} • 👤 Assigned to {p[4]}</p>", unsafe_allow_html=True)
             st.write(p[3])
-            # DISPLAY INITIAL IMAGE
-            if p[7]: st.image(f"data:image/png;base64,{p[7]}", caption="Project Reference")
+            if p[7]: st.image(f"data:image/png;base64,{p[7]}", use_container_width=True)
             
         with col_chat:
             st.markdown("### Discussion")
@@ -148,8 +169,8 @@ elif st.session_state.view == "view_project":
                     st.divider()
             
             with st.container(border=True):
-                up_img = st.file_uploader("Upload/Paste Image", type=['png','jpg','jpeg'], label_visibility="collapsed")
-                m_in = st.chat_input("Post a comment...")
+                up_img = st.file_uploader("Upload Image", type=['png','jpg','jpeg'], label_visibility="collapsed")
+                m_in = st.chat_input("Update project...")
                 if m_in or up_img:
                     b64 = img_to_base64(Image.open(up_img)) if up_img else None
                     now = datetime.now().strftime("%I:%M %p")
