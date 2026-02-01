@@ -1,353 +1,167 @@
 import streamlit as st
-from streamlit_quill import st_quill
-import pandas as pd
-from datetime import datetime
+import sqlite3
+from datetime import datetime, date, timedelta
+from streamlit_quill import st_quill 
 
-# --- CONFIG & SESSIONS ---
-st.set_page_config(page_title="Arma Staff Portal", layout="wide")
+# --- 1. DATABASE ---
+conn = sqlite3.connect('gsa_portal_final.db', check_same_thread=False)
+c = conn.cursor()
+# Ensure all tables exist
+c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)')
+c.execute('CREATE TABLE IF NOT EXISTS mods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, severity INTEGER, details TEXT, is_done INTEGER)')
+c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)')
+c.execute('CREATE TABLE IF NOT EXISTS events (date_val TEXT PRIMARY KEY, type TEXT)')
+conn.commit()
 
-# Mock User Login
-USER_EMAIL = "armasupplyguy@gmail.com"
+# --- 2. SESSION STATE ---
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "view" not in st.session_state: st.session_state.view = "HOME"
+if "active_mod_id" not in st.session_state: st.session_state.active_mod_id = None
+if "sel_date" not in st.session_state: st.session_state.sel_date = str(date.today())
 
-# --- INITIALIZE STATE ---
-if "role_db" not in st.session_state:
-    st.session_state.role_db = {
-        "armasupplyguy@gmail.com": "SUPER_ADMIN"
+# --- 3. CLEAN CSS (Sharp Edges, No Gaps) ---
+st.set_page_config(page_title="GSA COMMAND", layout="wide")
+st.markdown("""
+<style>
+    .stApp { background-color: #0b0c0e; }
+    [data-testid="stSidebar"] { background-color: #000000 !important; border-right: 1px solid #1e1e1e !important; }
+    .block-container { padding: 1rem 2rem !important; }
+    div[data-testid="stVerticalBlock"] { gap: 0rem !important; }
+    * { border-radius: 0px !important; }
+
+    .section-header {
+        background-color: #2b2d31;
+        color: #ffffff;
+        padding: 6px 15px;
+        font-weight: 800;
+        font-size: 11px;
+        text-transform: uppercase;
+        margin-top: 15px;
     }
 
-if "mods" not in st.session_state:
-    st.session_state.mods = []
+    .stButton>button {
+        width: 100% !important;
+        background-color: transparent !important;
+        border: none !important;
+        color: #949ba4 !important;
+        text-align: left !important;
+        padding: 5px 20px !important;
+        font-size: 13px !outset;
+    }
 
-if "events" not in st.session_state:
-    st.session_state.events = []
+    .stButton>button:hover, .stButton>button:focus {
+        color: #ffffff !important;
+        background-color: #1e1f22 !important;
+        border-left: 2px solid #5865f2 !important;
+    }
 
-if "tutorials" not in st.session_state:
-    st.session_state.tutorials = []
-
-if "page" not in st.session_state:
-    st.session_state.page = "report_broken_mod"
-
-if "selected_mod_id" not in st.session_state:
-    st.session_state.selected_mod_id = None
-
-# --- SAFETY CHECK: AUTO-FIX MISSING DATA ---
-for mod in st.session_state.mods:
-    if "discussion" not in mod:
-        mod["discussion"] = []
-
-user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
-
-# --- NAVIGATION CALLBACK FUNCTION ---
-def navigate_to(page_name, mod_id=None):
-    st.session_state.page = page_name
-    st.session_state.selected_mod_id = mod_id
-
-# --- CSS: AGGRESSIVE DARK MODE & STICKY HEADER ---
-st.markdown("""
-    <style>
-        /* Invert Iframes for Dark Text Editor */
-        .stMain iframe {
-            filter: invert(1) hue-rotate(180deg);
-        }
-        .stMain iframe img {
-            filter: invert(1) hue-rotate(180deg);
-        }
-        
-        /* STICKY TOP MENU */
-        div[data-testid="stHorizontalBlock"] {
-            position: sticky;
-            top: 2.875rem; 
-            z-index: 999;
-            background-color: #0e1117;
-            padding-bottom: 10px;
-            padding-top: 10px;
-            border-bottom: 1px solid #333;
-        }
-
-        /* Nav Button Styling */
-        div[data-testid="stHorizontalBlock"] button {
-            width: 100%;
-            border-radius: 0px;
-            border: 1px solid #333;
-            background-color: #222;
-            color: white;
-        }
-        div[data-testid="stHorizontalBlock"] button:hover {
-            border-color: #555;
-            color: #4CAF50;
-        }
-    </style>
+    .chat-msg { background: #111214; border-left: 2px solid #5865f2; padding: 8px; margin-bottom: 2px; font-size: 12px; }
+    .roster-card { background: #000; border: 1px solid #1e1e1e; padding: 12px; margin-bottom: 2px; }
+</style>
 """, unsafe_allow_html=True)
 
-# --- HELPER: SIDEBAR LIGHT LOGIC ---
-def get_mod_status():
-    if not st.session_state.mods:
-        return "🟢"
-    incomplete = any(not m['complete'] for m in st.session_state.mods)
-    return "🔴" if incomplete else "🟢"
-
-# --- SIDEBAR MENU (CREATION CENTER) ---
-st.sidebar.title("🛠 Staff Portal")
-st.sidebar.write(f"Logged in as: **{USER_EMAIL}**")
-st.sidebar.divider()
-
-# Category: Server Admin
-if user_role in ["admin", "SUPER_ADMIN"]:
-    st.sidebar.subheader("Server Admin")
-    mod_light = get_mod_status()
-    
-    # Action: Report Broken Mod
-    st.sidebar.button(
-        f"{mod_light} Report Broken Mod", 
-        on_click=navigate_to, 
-        args=("report_broken_mod", None)
-    )
-
-# Category: CLP Management
-st.sidebar.subheader("CLP Management")
-if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
-    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
-        st.sidebar.button("📅 Create Event", on_click=navigate_to, args=("create_event",))
-        st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("create_tutorial",))
-
-# Super Admin Only
-if user_role == "SUPER_ADMIN":
-    st.sidebar.divider()
-    st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
-
-
-# --- TOP LEVEL NAVIGATION (READ ONLY VIEWS) ---
-# Added 6th column for "Fixed"
-nav_col1, nav_col2, nav_col3, nav_col4, nav_col5, nav_col6 = st.columns(6)
-
-with nav_col1:
-    st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
-with nav_col2:
-    st.button("Fixed", use_container_width=True, on_click=navigate_to, args=("view_fixed_mods",))
-with nav_col3:
-    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
-with nav_col4:
-    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
-with nav_col5:
-    st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
-with nav_col6:
-    st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
-
-st.markdown("---") 
-
-# --- PAGE: REPORT BROKEN MOD (FORM) ---
-if st.session_state.page == "report_broken_mod":
-    st.title("Report Broken Mod")
-    
-    with st.container(border=True):
-        st.subheader("Create New Report")
-        name = st.text_input("Mod Name")
-        mod_json = st.text_area("Mod JSON Code", help="Paste JSON configuration here", height=100)
-        severity = st.select_slider("Severity", options=range(1, 11))
-        assignment = st.text_input("Assign to User")
-        st.write("Description (Rich Text):")
+# --- 4. SECURED LOGIN (No Auto-Login) ---
+if not st.session_state.logged_in:
+    _, col, _ = st.columns([1, 1, 1])
+    with col:
+        st.markdown("<h3 style='text-align:center; color:#5865f2;'>GSA HQ</h3>", unsafe_allow_html=True)
+        email = st.text_input("EMAIL").lower().strip()
+        pwd = st.text_input("PASSWORD", type="password")
         
-        desc = st_quill(placeholder="Describe the issue...", key="new_mod_desc", html=True)
-        
-        if st.button("Submit Report"):
-            st.session_state.mods.append({
-                "id": len(st.session_state.mods),
-                "name": name, 
-                "json_data": mod_json,
-                "severity": severity, 
-                "assignment": assignment,
-                "description": desc, 
-                "complete": False,
-                "discussion": [] 
-            })
-            st.success("Report Submitted!")
-            st.session_state.page = "view_broken_mods"
+        c1, c2 = st.columns(2)
+        if c1.button("LOG IN"):
+            # Strictly checking database for match
+            user = c.execute("SELECT username, role, status FROM users WHERE email=? AND password=?", (email, pwd)).fetchone()
+            if user:
+                if user[2] == "Approved":
+                    st.session_state.update({"logged_in": True, "user": user[0], "role": user[1]})
+                    st.rerun()
+                else: st.warning("ACCOUNT PENDING APPROVAL.")
+            else: st.error("INVALID CREDENTIALS.")
+            
+        if c2.button("REGISTER"):
+            st.session_state.view = "REGISTER"
             st.rerun()
 
-# --- PAGE: VIEW BROKEN MODS (LIST) ---
-elif st.session_state.page == "view_broken_mods":
-    st.title("Active Broken Mods")
-    active_mods = [m for m in st.session_state.mods if not m['complete']]
+    if st.session_state.view == "REGISTER":
+        with col:
+            new_u = st.text_input("CHOOSE USERNAME")
+            if st.button("SUBMIT REGISTRATION"):
+                try:
+                    c.execute("INSERT INTO users VALUES (?,?,?,?,?)", (email, pwd, new_u, "User", "Pending"))
+                    conn.commit()
+                    st.success("REQUEST SENT TO ADMIN.")
+                except: st.error("USER ALREADY EXISTS.")
+    st.stop()
+
+# --- 5. SIDEBAR NAVIGATION ---
+with st.sidebar:
+    st.markdown("<h4 style='color:#5865f2; margin: 15px 0 0 20px; font-weight:900;'>GSA HQ</h4>", unsafe_allow_html=True)
+    st.markdown(f"<p style='color:#4e5058; font-size:10px; margin: -5px 0 20px 20px;'>OPERATOR: {st.session_state.user.upper()}</p>", unsafe_allow_html=True)
     
-    if not active_mods:
-        st.success("All systems operational. No broken mods reported.")
-    else:
-        for mod in active_mods:
-            with st.container(border=True):
-                c1, c2 = st.columns([5,1])
-                with c1:
-                    st.subheader(f"⚠️ {mod['name']}")
-                    st.caption(f"Severity: {mod['severity']} | Assigned: {mod['assignment']}")
-                with c2:
-                    st.button("View Details", key=f"view_btn_{mod['id']}", on_click=navigate_to, args=("mod_detail", mod['id']))
-
-# --- PAGE: VIEW FIXED MODS (LIST) ---
-elif st.session_state.page == "view_fixed_mods":
-    st.title("Resolved Issues Archive")
-    fixed_mods = [m for m in st.session_state.mods if m['complete']]
+    st.markdown('<div class="section-header">SERVER ADMIN</div>', unsafe_allow_html=True)
+    if st.button("NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
+    for mid, mname in c.execute("SELECT id, name FROM mods WHERE is_done=0").fetchall():
+        if st.button(mname.upper(), key=f"nav_{mid}"):
+            st.session_state.active_mod_id, st.session_state.view = mid, "MOD_VIEW"; st.rerun()
     
-    if not fixed_mods:
-        st.info("No resolved issues yet.")
-    else:
-        for mod in fixed_mods:
-            with st.container(border=True):
-                c1, c2 = st.columns([5,1])
-                with c1:
-                    st.subheader(f"✅ {mod['name']}")
-                    st.caption(f"Resolved | Original Severity: {mod['severity']}")
-                with c2:
-                    # Allow viewing history of fixed mods too
-                    st.button("View Archive", key=f"view_fixed_btn_{mod['id']}", on_click=navigate_to, args=("mod_detail", mod['id']))
-
-# --- PAGE: MOD DETAIL & CHAT ---
-elif st.session_state.page == "mod_detail":
-    current_mod = next((m for m in st.session_state.mods if m['id'] == st.session_state.selected_mod_id), None)
+    st.markdown('<div class="section-header">CLP LEADS</div>', unsafe_allow_html=True)
+    if st.button("TRAINING ROSTER"): st.session_state.view = "CALENDAR"; st.rerun()
     
-    if current_mod:
-        st.title(f"Issue: {current_mod['name']}")
-        
-        col_report, col_chat = st.columns([2, 1])
-        
-        with col_report:
-            with st.container(border=True):
-                st.caption(f"Severity: {current_mod['severity']} | Assigned: {current_mod['assignment']}")
-                
-                if current_mod.get('json_data'):
-                    st.code(current_mod['json_data'], language='json')
-                
-                st.markdown(current_mod['description'], unsafe_allow_html=True)
-                
-                st.divider()
-                
-                # --- CHANGE: BUTTON INSTEAD OF CHECKBOX ---
-                if not current_mod['complete']:
-                    if st.button("✅ Mark as Resolved", type="primary"):
-                        current_mod['complete'] = True
-                        st.success("Issue resolved! Moved to Fixed dump.")
-                        st.session_state.page = "view_fixed_mods" # Redirect to Fixed dump
-                        st.rerun()
-                else:
-                    st.success("This issue is marked as RESOLVED.")
-                    # Optional: Ability to reopen
-                    if st.button("Re-open Issue"):
-                        current_mod['complete'] = False
-                        st.rerun()
+    st.markdown('<div class="section-header">ARCHIVE</div>', unsafe_allow_html=True)
+    for aid, aname in c.execute("SELECT id, name FROM mods WHERE is_done=1").fetchall():
+        if st.button(f"✓ {aname.upper()}", key=f"arch_{aid}"):
+            st.session_state.active_mod_id, st.session_state.view = aid, "MOD_VIEW"; st.rerun()
 
-        with col_chat:
-            st.subheader("💬 Discussion")
-            chat_container = st.container(height=400, border=True)
-            for msg in current_mod['discussion']:
-                chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
-                chat_container.caption(f"{msg['time']}")
-                chat_container.divider()
-            
-            with st.form(key="chat_form", clear_on_submit=True):
-                user_msg = st.text_input("Type a message...")
-                submit_chat = st.form_submit_button("Send")
-                
-                if submit_chat and user_msg:
-                    timestamp = datetime.now().strftime("%H:%M")
-                    current_mod['discussion'].append({
-                        "user": USER_EMAIL,
-                        "text": user_msg,
-                        "time": timestamp
-                    })
-                    st.rerun()
-    else:
-        st.error("Mod report not found.")
+    st.markdown("<div style='margin-top: 40px;'></div>")
+    if st.button("LOGOUT"): st.session_state.logged_in = False; st.rerun()
 
-# --- PAGE: CREATE EVENT (FORM ONLY) ---
-elif st.session_state.page == "create_event":
-    st.title("Create New Event")
-    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
-        with st.container(border=True):
-            e_name = st.text_input("Event Name")
-            e_date = st.date_input("Date")
-            e_time = st.time_input("Time")
-            e_tz = st.selectbox("Timezone", ["UTC", "EST", "PST", "GMT"])
-            e_loc = st.text_input("Location (Server/Discord)")
-            st.write("Event Details (Rich Text):")
-            e_desc = st_quill(key="event_quill_create")
-            
-            if st.button("Publish Event"):
-                st.session_state.events.append({
-                    "name": e_name, "date": str(e_date), "time": str(e_time),
-                    "tz": e_tz, "loc": e_loc, "desc": e_desc
-                })
-                st.success("Event Published!")
-                st.session_state.page = "view_events"
-                st.rerun()
-    else:
-        st.error("You do not have permission to create events.")
+# --- 6. WORKSPACES (Restored Logic) ---
+if st.session_state.view == "CALENDAR":
+    st.markdown("### 🗓️ TRAINING ROSTER")
+    left, right = st.columns([1.5, 1])
+    with left:
+        for i in range(12):
+            day = date.today() + timedelta(days=i)
+            ev = c.execute("SELECT type FROM events WHERE date_val=?", (str(day),)).fetchone()
+            st.markdown(f'<div class="roster-card"><b style="color:#43b581;">{day.strftime("%A, %b %d")}</b><br>'
+                        f'<small style="color:#888;">{ev[0] if ev else "EMPTY"}</small></div>', unsafe_allow_html=True)
+            if st.button(f"EDIT {day.strftime('%d %b')}", key=f"cal_{day}"):
+                st.session_state.sel_date = str(day); st.rerun()
+    with right:
+        st.markdown(f"#### EDIT: {st.session_state.sel_date}")
+        with st.form("cal_form", border=False):
+            txt = st.text_area("BRIEFING", height=150)
+            if st.form_submit_button("SAVE"):
+                c.execute("INSERT OR REPLACE INTO events (date_val, type) VALUES (?,?)", (st.session_state.sel_date, txt))
+                conn.commit(); st.rerun()
 
-# --- PAGE: VIEW EVENTS (READ ONLY LIST) ---
-elif st.session_state.page == "view_events":
-    st.title("Training & Events Calendar")
-    
-    if not st.session_state.events:
-        st.info("No events scheduled.")
-    
-    for event in st.session_state.events:
-        with st.chat_message("event"):
-            st.write(f"### {event['name']}")
-            st.write(f"🕒 {event['date']} at {event['time']} ({event['tz']}) | 📍 {event['loc']}")
-            st.markdown(event['desc'], unsafe_allow_html=True)
+elif st.session_state.view == "MOD_VIEW":
+    mod = c.execute("SELECT * FROM mods WHERE id=?", (st.session_state.active_mod_id,)).fetchone()
+    if mod:
+        st.markdown(f"### {mod[1].upper()}")
+        l, r = st.columns([1.6, 1], gap="large")
+        with l:
+            st.markdown(mod[3], unsafe_allow_html=True)
+            if st.button("MARK RESOLVED" if not mod[4] else "RE-OPEN"):
+                c.execute("UPDATE mods SET is_done=? WHERE id=?", (1 if not mod[4] else 0, mod[0]))
+                conn.commit(); st.rerun()
+        with r:
+            st.markdown("##### STAFF LOGS")
+            msg = st.text_input("INTEL...", key="chat_input")
+            if msg:
+                c.execute("INSERT INTO comments (mod_id, user, timestamp, comment) VALUES (?,?,?,?)", 
+                          (mod[0], st.session_state.user, datetime.now().strftime("%H:%M"), msg))
+                conn.commit(); st.rerun()
+            for u, t, m in c.execute("SELECT user, timestamp, comment FROM comments WHERE mod_id=? ORDER BY id DESC", (mod[0],)).fetchall():
+                st.markdown(f'<div class="chat-msg"><b>{u.upper()}</b> <span style="color:#5865f2">{t}</span><br>{m}</div>', unsafe_allow_html=True)
 
-# --- PAGE: CREATE TUTORIAL (FORM ONLY) ---
-elif st.session_state.page == "create_tutorial":
-    st.title("Create New Tutorial")
-    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
-        with st.container(border=True):
-            t_title = st.text_input("Tutorial Title")
-            t_content = st_quill(key="tut_quill_create")
-            if st.button("Save Tutorial"):
-                st.session_state.tutorials.append({"title": t_title, "content": t_content})
-                st.success("Tutorial Saved!")
-                st.session_state.page = "view_tutorials"
-                st.rerun()
-    else:
-        st.error("You do not have permission to create tutorials.")
-
-# --- PAGE: VIEW TUTORIALS (READ ONLY LIST) ---
-elif st.session_state.page == "view_tutorials":
-    st.title("Tutorials Library")
-    
-    if not st.session_state.tutorials:
-        st.info("No tutorials available.")
-
-    for tut in st.session_state.tutorials:
-        with st.container(border=True):
-            st.subheader(tut['title'])
-            st.markdown(tut['content'], unsafe_allow_html=True)
-
-# --- PAGE: VIEW USERS (ONLINE ROSTER) ---
-elif st.session_state.page == "view_users":
-    st.title("Staff Roster & Online Status")
-    
-    for email, role in st.session_state.role_db.items():
-        with st.container(border=True):
-            col_avatar, col_info, col_status = st.columns([1, 4, 2])
-            
-            with col_avatar:
-                st.write("👤") 
-                
-            with col_info:
-                st.subheader(email)
-                st.caption(f"Role: {role}")
-                
-            with col_status:
-                if email == USER_EMAIL:
-                    st.success("🟢 Online")
-                else:
-                    st.write("⚪ Offline")
-
-# --- PAGE: ROLE MANAGEMENT ---
-elif st.session_state.page == "roles":
-    st.title("Super Admin: Role Management")
-    new_email = st.text_input("User Email")
-    new_role = st.selectbox("Assign Role", ["admin", "CLPLEAD", "CLP"])
-    if st.button("Update Role"):
-        st.session_state.role_db[new_email] = new_role
-        st.success(f"Updated {new_email} to {new_role}")
-    
-    st.table(pd.DataFrame(st.session_state.role_db.items(), columns=["Email", "Role"]))
+elif st.session_state.view == "LOG_MOD":
+    st.markdown("### LOG NEW PROBLEM")
+    with st.form("new_log", border=False):
+        name = st.text_input("MOD NAME")
+        sev = st.select_slider("SEVERITY", options=range(1, 11))
+        details = st_quill(placeholder="Briefing...")
+        if st.form_submit_button("COMMIT"):
+            c.execute("INSERT INTO mods (name, severity, details, is_done) VALUES (?,?,?,0)", (name, sev, details))
+            conn.commit(); st.session_state.view = "HOME"; st.rerun()
