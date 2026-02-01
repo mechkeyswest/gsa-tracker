@@ -11,11 +11,9 @@ USER_EMAIL = "armasupplyguy@gmail.com"
 
 # --- INITIALIZE STATE ---
 if "role_db" not in st.session_state:
+    # CLEAN DB: Only you exist initially. Add others via "Assign Roles".
     st.session_state.role_db = {
-        "armasupplyguy@gmail.com": "SUPER_ADMIN",
-        "staff1@gmail.com": "admin",
-        "lead1@gmail.com": "CLPLEAD",
-        "player1@gmail.com": "CLP"
+        "armasupplyguy@gmail.com": "SUPER_ADMIN"
     }
 
 if "mods" not in st.session_state:
@@ -56,15 +54,12 @@ st.markdown("""
             filter: invert(1) hue-rotate(180deg);
         }
         
-        /* STICKY TOP MENU
-           We target the first horizontal block (the nav bar) and stick it.
-           'top: 2.875rem' accounts for the standard Streamlit header bar.
-        */
+        /* STICKY TOP MENU */
         div[data-testid="stHorizontalBlock"] {
             position: sticky;
             top: 2.875rem; 
             z-index: 999;
-            background-color: #0e1117; /* Matches standard dark theme background */
+            background-color: #0e1117;
             padding-bottom: 10px;
             padding-top: 10px;
             border-bottom: 1px solid #333;
@@ -108,12 +103,10 @@ if user_role in ["admin", "SUPER_ADMIN"]:
         on_click=navigate_to, 
         args=("report_broken_mod", None)
     )
-    # NOTE: Removed the list of active mods from sidebar as requested
 
 # Category: CLP Management
 st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
-    # Action: Create Event (Leads Only)
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
         st.sidebar.button("📅 Create Event", on_click=navigate_to, args=("create_event",))
         st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("create_tutorial",))
@@ -125,8 +118,8 @@ if user_role == "SUPER_ADMIN":
 
 
 # --- TOP LEVEL NAVIGATION (READ ONLY VIEWS) ---
-# This block is sticky thanks to the CSS above
-nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
+# Added 5th column for "Users"
+nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns(5)
 
 with nav_col1:
     st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
@@ -136,8 +129,10 @@ with nav_col3:
     st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
 with nav_col4:
     st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
+with nav_col5:
+    st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
 
-st.markdown("---") # Visual separator between sticky header and content
+st.markdown("---") 
 
 # --- PAGE: REPORT BROKEN MOD (FORM) ---
 if st.session_state.page == "report_broken_mod":
@@ -165,7 +160,7 @@ if st.session_state.page == "report_broken_mod":
                 "discussion": [] 
             })
             st.success("Report Submitted!")
-            st.session_state.page = "view_broken_mods" # Auto-redirect to list
+            st.session_state.page = "view_broken_mods"
             st.rerun()
 
 # --- PAGE: VIEW BROKEN MODS (LIST) ---
@@ -252,7 +247,7 @@ elif st.session_state.page == "create_event":
                     "tz": e_tz, "loc": e_loc, "desc": e_desc
                 })
                 st.success("Event Published!")
-                st.session_state.page = "view_events" # Auto-redirect to list
+                st.session_state.page = "view_events"
                 st.rerun()
     else:
         st.error("You do not have permission to create events.")
@@ -280,7 +275,7 @@ elif st.session_state.page == "create_tutorial":
             if st.button("Save Tutorial"):
                 st.session_state.tutorials.append({"title": t_title, "content": t_content})
                 st.success("Tutorial Saved!")
-                st.session_state.page = "view_tutorials" # Auto-redirect to list
+                st.session_state.page = "view_tutorials"
                 st.rerun()
     else:
         st.error("You do not have permission to create tutorials.")
@@ -296,6 +291,29 @@ elif st.session_state.page == "view_tutorials":
         with st.container(border=True):
             st.subheader(tut['title'])
             st.markdown(tut['content'], unsafe_allow_html=True)
+
+# --- PAGE: VIEW USERS (ONLINE ROSTER) ---
+elif st.session_state.page == "view_users":
+    st.title("Staff Roster & Online Status")
+    
+    # Simple roster view from the database
+    for email, role in st.session_state.role_db.items():
+        with st.container(border=True):
+            col_avatar, col_info, col_status = st.columns([1, 4, 2])
+            
+            with col_avatar:
+                st.write("👤") # Placeholder avatar
+                
+            with col_info:
+                st.subheader(email)
+                st.caption(f"Role: {role}")
+                
+            with col_status:
+                # Simulation: Since this is a script, only YOU are technically "online" in this session.
+                if email == USER_EMAIL:
+                    st.success("🟢 Online")
+                else:
+                    st.write("⚪ Offline")
 
 # --- PAGE: ROLE MANAGEMENT ---
 elif st.session_state.page == "roles":
