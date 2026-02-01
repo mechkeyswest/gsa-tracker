@@ -40,10 +40,12 @@ def load_db():
             if "mod_library" not in data: data["mod_library"] = []
             if "server_configs" not in data: data["server_configs"] = []
             if "projects" not in data: data["projects"] = []
+            
             for m in data.get("mods", []):
                 if "read" not in m: m["read"] = True
             for p in data.get("projects", []):
                 if "read" not in p: p["read"] = True
+                
             return data
     except json.JSONDecodeError: return {} 
 
@@ -88,11 +90,13 @@ if "selected_mod_id" not in st.session_state: st.session_state.selected_mod_id =
 if "selected_project_id" not in st.session_state: st.session_state.selected_project_id = None
 if "editor_content" not in st.session_state: st.session_state.editor_content = "[\n\n]"
 if "fetched_mod" not in st.session_state: st.session_state.fetched_mod = None
+# KEY FIX: Refresh counter to force text area update
+if "editor_key" not in st.session_state: st.session_state.editor_key = 0 
 
-# --- EDITOR SYNC CALLBACK (FIXES CRASH) ---
+# --- CALLBACK TO SYNC EDITOR ---
 def sync_editor():
-    """Syncs the text area content to session state when user types."""
-    st.session_state.editor_content = st.session_state.main_json_editor
+    """Captures manual typing in the text box"""
+    st.session_state.editor_content = st.session_state[f"json_area_{st.session_state.editor_key}"]
 
 # --- CSS ---
 st.markdown("""
@@ -201,14 +205,18 @@ st.sidebar.divider()
 
 st.sidebar.button("📢 Announcements", on_click=navigate_to, args=("view_announcements",))
 
+# MOVED: Mod Studio to Top (Super Admin Only)
 if user_role == "SUPER_ADMIN":
     st.sidebar.button("📝 Mod Studio", on_click=navigate_to, args=("json_editor",))
 
+# --- ADMIN SECTION ---
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     st.sidebar.button(f"{get_mod_status()} Report Broken Mod", on_click=navigate_to, args=("report_broken_mod", None))
+    # NEW JOB BUTTON (ADMIN ONLY)
     st.sidebar.button("🚀 Submit New Job", on_click=navigate_to, args=("create_project",))
 
+# --- CLP SECTION ---
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
     st.sidebar.subheader("CLP Management")
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
@@ -251,6 +259,7 @@ if st.session_state.page == "view_announcements":
             st.caption(f"{a['date']} by {a['author']}")
             st.markdown(a['content'], unsafe_allow_html=True)
 
+# --- CREATE PROJECT PAGE (Saves to PROJECTS) ---
 elif st.session_state.page == "create_project":
     st.title("🚀 Submit New Job / Project")
     st.caption("This will create a task in the 'New Work' tab.")
@@ -263,6 +272,7 @@ elif st.session_state.page == "create_project":
         p_desc = st_quill(key="proj_desc_page", html=True)
         
         if st.button("Create Project", type="primary"):
+            # SAVE TO 'projects' ONLY
             DB['projects'].append({
                 "id": len(DB['projects']),
                 "name": p_name,
@@ -278,6 +288,7 @@ elif st.session_state.page == "create_project":
             st.session_state.page = "view_projects"
             st.rerun()
 
+# --- REPORT BROKEN MOD PAGE (Saves to MODS) ---
 elif st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     st.caption("This will create a ticket in the 'Broken Mods' tab.")
@@ -289,6 +300,7 @@ elif st.session_state.page == "report_broken_mod":
     st.write("Description:")
     desc = st_quill(key="mod_desc", html=True)
     if st.button("Submit Report"):
+        # SAVE TO 'mods' ONLY
         DB['mods'].append({
             "id": len(DB['mods']), 
             "name": name, 
@@ -305,10 +317,12 @@ elif st.session_state.page == "report_broken_mod":
         st.session_state.page = "view_broken_mods"
         st.rerun()
 
+# --- VIEW BROKEN MODS (Reads from MODS) ---
 elif st.session_state.page == "view_broken_mods":
     if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
         st.title("Active Broken Mods")
+        # READ FROM 'mods' ONLY
         active = [m for m in DB['mods'] if not m['complete']]
         if not active: st.success("No active issues.")
         for m in active:
@@ -322,8 +336,10 @@ elif st.session_state.page == "view_broken_mods":
                     if st.button("Details", key=f"d_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id'], None)):
                         pass
 
+# --- VIEW PROJECTS (Reads from PROJECTS) ---
 elif st.session_state.page == "view_projects":
     st.title("New Work / Active Projects")
+    # READ FROM 'projects' ONLY
     active_projs = [p for p in DB['projects'] if not p['complete']]
     
     if not active_projs:
@@ -341,6 +357,7 @@ elif st.session_state.page == "view_projects":
                     if st.button("Open", key=f"p_{p['id']}", on_click=navigate_to, args=("project_detail", None, p['id'])):
                         pass
 
+# --- VIEW FIXED MODS ---
 elif st.session_state.page == "view_fixed_mods":
     if user_role not in ["admin", "SUPER_ADMIN"]: st.error("Access Denied.")
     else:
@@ -353,6 +370,7 @@ elif st.session_state.page == "view_fixed_mods":
                 with c1: st.subheader(f"✅ {m['name']}")
                 with c2: st.button("Archive View", key=f"a_{m['id']}", on_click=navigate_to, args=("mod_detail", m['id'], None))
 
+# --- MOD DETAIL ---
 elif st.session_state.page == "mod_detail":
     m = next((x for x in DB['mods'] if x['id'] == st.session_state.selected_mod_id), None)
     
@@ -396,6 +414,7 @@ elif st.session_state.page == "mod_detail":
                     save_db(DB)
                     st.rerun()
 
+# --- PROJECT DETAIL ---
 elif st.session_state.page == "project_detail":
     p = next((x for x in DB['projects'] if x['id'] == st.session_state.selected_project_id), None)
     
@@ -423,6 +442,7 @@ elif st.session_state.page == "project_detail":
                 st.success("Project Completed.")
         with c2:
             st.subheader("Discussion")
+            # Unified Chat Style (No Dividers)
             chat = st.container(height=400, border=True)
             for msg in p.get('discussion', []):
                 chat.markdown(f"**{msg['user']}**: {msg['text']}")
@@ -534,8 +554,7 @@ elif st.session_state.page == "json_editor":
                         found = next((c for c in DB['server_configs'] if c['name'] == selected_conf), None)
                         if found:
                             st.session_state.editor_content = found['content']
-                            # UPDATE BOTH STATE KEYS TO REFRESH WIDGET
-                            st.session_state.main_json_editor = found['content'] 
+                            st.session_state.editor_key += 1 # INCREMENT KEY
                             st.success(f"Loaded '{selected_conf}'!")
                             st.rerun()
                 with c_save:
@@ -556,17 +575,17 @@ elif st.session_state.page == "json_editor":
             st.divider()
             st.subheader("Active JSON Editor")
             st.caption("Press 'Ctrl+A' then 'Ctrl+C' inside the box to copy everything.")
-            # Added on_change callback to sync typing
+            
+            # --- FIX: DYNAMIC KEY TO FORCE UPDATE ---
             json_text = st.text_area(
                 "JSON Output", 
                 value=st.session_state.editor_content, 
                 height=600, 
-                key="main_json_editor",
+                key=f"json_area_{st.session_state.editor_key}", # DYNAMIC KEY
                 on_change=sync_editor
             )
 
         with col_tools:
-            # FIX: Place Tabs OUTSIDE the scrollable container to effectively "Stick" them to the top
             tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
             
             with tab_search:
@@ -615,20 +634,17 @@ elif st.session_state.page == "json_editor":
                                     else: new_s = "[\n" + snippet + "\n]"
                                 else: new_s = cur + ",\n" + snippet
                                 st.session_state.editor_content = new_s
-                                # Removed main_json_editor setting to avoid crash
+                                st.session_state.editor_key += 1 # TRIGGER REFRESH
                                 st.rerun()
 
             with tab_saved:
-                # Filter stays at top
                 lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
                 
-                # ALPHABETIZED SORTING
                 filtered = sorted(
                     [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()],
                     key=lambda x: x.get('name', '').lower()
                 )
                 
-                # Scrollable list of mods below filter
                 with st.container(height=600, border=True):
                     if not filtered: st.info("No saved mods.")
                     for mod in filtered:
@@ -650,7 +666,7 @@ elif st.session_state.page == "json_editor":
                                         else: new_s = "[\n" + snippet + "\n]"
                                     else: new_s = cur + ",\n" + snippet
                                     st.session_state.editor_content = new_s
-                                    # Removed main_json_editor setting to avoid crash
+                                    st.session_state.editor_key += 1 # TRIGGER REFRESH
                                     st.rerun()
                             
                             with c_copy:
