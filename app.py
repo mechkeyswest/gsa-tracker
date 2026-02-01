@@ -59,7 +59,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. SECURED LOGIN & BOOTSTRAP ---
+# --- 4. LOGIN & FORCE-APPROVAL LOGIC ---
 if not st.session_state.logged_in:
     _, col, _ = st.columns([1, 1, 1])
     with col:
@@ -69,18 +69,23 @@ if not st.session_state.logged_in:
         
         c1, c2 = st.columns(2)
         if c1.button("LOG IN"):
-            # BOOTSTRAP SUPER ADMIN
+            # FORCE APPROVAL FOR THE OWNER
             if email == "armasupplyguy@gmail.com":
-                c.execute("INSERT OR IGNORE INTO users VALUES (?,?,?,?,?)", (email, pwd, "SUPPLY", "Super Admin", "Approved"))
+                # Upsert your account as approved Super Admin
+                c.execute('''INSERT OR REPLACE INTO users (email, password, username, role, status) 
+                             VALUES (?, ?, 'SUPPLY', 'Super Admin', 'Approved')''', (email, pwd))
                 conn.commit()
 
             user = c.execute("SELECT username, role, status FROM users WHERE email=? AND password=?", (email, pwd)).fetchone()
             if user:
+                # Bypass check for the Super Admin
                 if user[2] == "Approved":
                     st.session_state.update({"logged_in": True, "user": user[0], "role": user[1]})
                     st.rerun()
-                else: st.warning("ACCOUNT PENDING APPROVAL.")
-            else: st.error("INVALID CREDENTIALS.")
+                else: 
+                    st.warning("ACCOUNT PENDING APPROVAL. CONTACT SYSTEM OWNER.")
+            else: 
+                st.error("INVALID CREDENTIALS.")
             
         if c2.button("REGISTER"):
             st.session_state.view = "REGISTER"
@@ -108,7 +113,7 @@ with st.sidebar:
         if st.button("USER PERMISSIONS"): st.session_state.view = "PERMISSIONS"; st.rerun()
 
     st.markdown('<div class="section-header">SERVER ADMIN</div>', unsafe_allow_html=True)
-    if st.button("NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
+    if st.button("LOG NEW PROBLEM"): st.session_state.view = "LOG_MOD"; st.rerun()
     for mid, mname in c.execute("SELECT id, name FROM mods WHERE is_done=0").fetchall():
         if st.button(mname.upper(), key=f"nav_{mid}"):
             st.session_state.active_mod_id, st.session_state.view = mid, "MOD_VIEW"; st.rerun()
