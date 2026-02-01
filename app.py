@@ -17,6 +17,7 @@ if "role_db" not in st.session_state:
         "player1@gmail.com": "CLP"
     }
 
+# Initialize Mods with Discussion capabilities
 if "mods" not in st.session_state:
     st.session_state.mods = []
 
@@ -27,19 +28,19 @@ if "tutorials" not in st.session_state:
     st.session_state.tutorials = []
 
 if "page" not in st.session_state:
-    st.session_state.page = "broken_mods"
+    st.session_state.page = "report_broken_mod"
+
+if "selected_mod_id" not in st.session_state:
+    st.session_state.selected_mod_id = None
 
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
 # --- AGGRESSIVE DARK MODE CSS ---
 st.markdown("""
     <style>
-        /* NUCLEAR OPTION: Target ANY iframe in the main area */
         .stMain iframe {
             filter: invert(1) hue-rotate(180deg);
         }
-        
-        /* Optional: Re-invert images if they look weird inside the editor */
         .stMain iframe img {
             filter: invert(1) hue-rotate(180deg);
         }
@@ -62,8 +63,27 @@ st.sidebar.divider()
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     mod_light = get_mod_status()
-    if st.sidebar.button(f"{mod_light} Broken Mods"):
-        st.session_state.page = "broken_mods"
+    
+    # Main Button: Report Broken Mod
+    if st.sidebar.button(f"{mod_light} Report Broken Mod"):
+        st.session_state.page = "report_broken_mod"
+        st.session_state.selected_mod_id = None
+        st.rerun()
+
+    # Sub-Menu: List Active Broken Mods
+    st.sidebar.markdown("---")
+    st.sidebar.caption("ACTIVE ISSUES")
+    active_mods = [m for m in st.session_state.mods if not m['complete']]
+    
+    if not active_mods:
+        st.sidebar.info("No active issues.")
+    
+    for mod in active_mods:
+        # Clicking this sets the page to 'mod_detail' and selects the ID
+        if st.sidebar.button(f"🔸 {mod['name']}", key=f"sidebar_link_{mod['id']}"):
+            st.session_state.page = "mod_detail"
+            st.session_state.selected_mod_id = mod['id']
+            st.rerun()
 
 # Category: CLP Management
 st.sidebar.subheader("CLP Management")
@@ -79,60 +99,90 @@ if user_role == "SUPER_ADMIN":
     if st.sidebar.button("🔑 Assign Roles"):
         st.session_state.page = "roles"
 
-# --- PAGE: BROKEN MODS ---
-if st.session_state.page == "broken_mods":
-    st.title("Broken Mods Tracker")
+# --- PAGE: REPORT BROKEN MOD (LANDING) ---
+if st.session_state.page == "report_broken_mod":
+    st.title("Report Broken Mod")
     
-    with st.expander("➕ Report New Broken Mod"):
+    # Creation Form
+    with st.container(border=True):
+        st.subheader("Create New Report")
         name = st.text_input("Mod Name")
-        
-        # JSON Code Spot
         mod_json = st.text_area("Mod JSON Code", help="Paste JSON configuration here", height=100)
-        
         severity = st.select_slider("Severity", options=range(1, 11))
         assignment = st.text_input("Assign to User")
         st.write("Description (Rich Text):")
         
-        # Text Editor
-        desc = st_quill(
-            placeholder="Describe the issue...", 
-            key="new_mod_desc",
-            html=True
-        )
+        desc = st_quill(placeholder="Describe the issue...", key="new_mod_desc", html=True)
         
-        if st.button("Add to List"):
+        if st.button("Submit Report"):
             st.session_state.mods.append({
+                "id": len(st.session_state.mods),
                 "name": name, 
                 "json_data": mod_json,
                 "severity": severity, 
                 "assignment": assignment,
                 "description": desc, 
-                "complete": False, 
-                "id": len(st.session_state.mods)
+                "complete": False,
+                "discussion": [] # Initialize empty chat list
             })
+            st.success("Report Submitted!")
             st.rerun()
 
-    for i, mod in enumerate(st.session_state.mods):
-        with st.container(border=True):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.subheader(f"{'✅' if mod['complete'] else '❌'} {mod['name']}")
+# --- PAGE: MOD DETAIL & CHAT ---
+elif st.session_state.page == "mod_detail":
+    # Find the specific mod
+    current_mod = next((m for m in st.session_state.mods if m['id'] == st.session_state.selected_mod_id), None)
+    
+    if current_mod:
+        st.title(f"Issue: {current_mod['name']}")
+        
+        # Split layout: Report on Left (2), Chat on Right (1)
+        col_report, col_chat = st.columns([2, 1])
+        
+        # LEFT COLUMN: THE REPORT
+        with col_report:
+            with st.container(border=True):
+                st.caption(f"Severity: {current_mod['severity']} | Assigned: {current_mod['assignment']}")
                 
-                # Display JSON Code
-                if mod.get('json_data'):
-                    st.code(mod['json_data'], language='json')
+                if current_mod.get('json_data'):
+                    st.code(current_mod['json_data'], language='json')
                 
-                st.markdown(mod['description'], unsafe_allow_html=True)
-                st.caption(f"Assigned to: {mod['assignment']} | Severity: {mod['severity']}")
-            with col2:
-                is_done = st.checkbox("Complete", value=mod['complete'], key=f"check_{i}")
-                if is_done != mod['complete']:
-                    st.session_state.mods[i]['complete'] = is_done
+                st.markdown(current_mod['description'], unsafe_allow_html=True)
+                
+                st.divider()
+                
+                # Completion Checkbox
+                is_complete = st.checkbox("Mark as Resolved", value=current_mod['complete'])
+                if is_complete != current_mod['complete']:
+                    current_mod['complete'] = is_complete
                     st.rerun()
-                    
-                if st.button("🗑️", key=f"del_{i}"):
-                    st.session_state.mods.pop(i)
+
+        # RIGHT COLUMN: DISCUSSION CHAT
+        with col_chat:
+            st.subheader("💬 Discussion")
+            
+            # Chat History Display
+            chat_container = st.container(height=400, border=True)
+            for msg in current_mod['discussion']:
+                chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
+                chat_container.caption(f"{msg['time']}")
+                chat_container.divider()
+            
+            # Chat Input
+            with st.form(key="chat_form", clear_on_submit=True):
+                user_msg = st.text_input("Type a message...")
+                submit_chat = st.form_submit_button("Send")
+                
+                if submit_chat and user_msg:
+                    timestamp = datetime.now().strftime("%H:%M")
+                    current_mod['discussion'].append({
+                        "user": USER_EMAIL,
+                        "text": user_msg,
+                        "time": timestamp
+                    })
                     st.rerun()
+    else:
+        st.error("Mod report not found.")
 
 # --- PAGE: EVENTS ---
 elif st.session_state.page == "events":
