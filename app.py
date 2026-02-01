@@ -3,9 +3,11 @@ import sqlite3
 from datetime import datetime, date, timedelta
 from streamlit_quill import st_quill 
 
-# --- 1. DATABASE & TABLES ---
-conn = sqlite3.connect('gsa_portal_final.db', check_same_thread=False)
+# --- 1. DATABASE SETUP ---
+conn = sqlite3.connect('gsa_portal_fixed.db', check_same_thread=False)
 c = conn.cursor()
+
+# Ensure tables exist
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT, status TEXT)')
 c.execute('CREATE TABLE IF NOT EXISTS mods (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, severity INTEGER, details TEXT, is_done INTEGER)')
 c.execute('CREATE TABLE IF NOT EXISTS comments (id INTEGER PRIMARY KEY AUTOINCREMENT, mod_id INTEGER, user TEXT, timestamp TEXT, comment TEXT)')
@@ -18,16 +20,20 @@ if "view" not in st.session_state: st.session_state.view = "HOME"
 if "active_mod_id" not in st.session_state: st.session_state.active_mod_id = None
 if "sel_date" not in st.session_state: st.session_state.sel_date = str(date.today())
 
-# --- 3. CLEAN UI CSS ---
+# --- 3. CLEAN UI (NO BOXES) ---
 st.set_page_config(page_title="GSA COMMAND", layout="wide")
 st.markdown("""
 <style>
+    /* Pitch Black Theme */
     .stApp { background-color: #0b0c0e; }
     [data-testid="stSidebar"] { background-color: #000000 !important; border-right: 1px solid #1e1e1e !important; }
+    
+    /* Remove padding/gaps */
     .block-container { padding: 1rem 2rem !important; }
     div[data-testid="stVerticalBlock"] { gap: 0rem !important; }
     * { border-radius: 0px !important; }
 
+    /* Grey Section Headers */
     .section-header {
         background-color: #2b2d31;
         color: #ffffff;
@@ -38,6 +44,7 @@ st.markdown("""
         margin-top: 15px;
     }
 
+    /* Flat Text Buttons */
     .stButton>button {
         width: 100% !important;
         background-color: transparent !important;
@@ -48,18 +55,20 @@ st.markdown("""
         font-size: 13px !important;
     }
 
+    /* Hover State (Blue bar on left) */
     .stButton>button:hover, .stButton>button:focus {
         color: #ffffff !important;
         background-color: #1e1f22 !important;
         border-left: 2px solid #5865f2 !important;
     }
 
+    /* Chat & Roster Cards */
     .chat-msg { background: #111214; border-left: 2px solid #5865f2; padding: 8px; margin-bottom: 2px; font-size: 12px; }
     .roster-card { background: #000; border: 1px solid #1e1e1e; padding: 12px; margin-bottom: 2px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 4. LOGIN & FORCE-APPROVAL LOGIC ---
+# --- 4. LOGIN (WITH FORCE FIX) ---
 if not st.session_state.logged_in:
     _, col, _ = st.columns([1, 1, 1])
     with col:
@@ -69,23 +78,20 @@ if not st.session_state.logged_in:
         
         c1, c2 = st.columns(2)
         if c1.button("LOG IN"):
-            # FORCE APPROVAL FOR THE OWNER
+            # --- THE FIX: Force Admin Rights for YOU ---
             if email == "armasupplyguy@gmail.com":
-                # Upsert your account as approved Super Admin
-                c.execute('''INSERT OR REPLACE INTO users (email, password, username, role, status) 
-                             VALUES (?, ?, 'SUPPLY', 'Super Admin', 'Approved')''', (email, pwd))
+                # If user exists, FORCE update to Approved/Admin. If not, Insert.
+                c.execute("INSERT OR REPLACE INTO users (email, password, username, role, status) VALUES (?, ?, 'SUPPLY', 'Super Admin', 'Approved')", (email, pwd))
                 conn.commit()
+            # -------------------------------------------
 
             user = c.execute("SELECT username, role, status FROM users WHERE email=? AND password=?", (email, pwd)).fetchone()
             if user:
-                # Bypass check for the Super Admin
                 if user[2] == "Approved":
                     st.session_state.update({"logged_in": True, "user": user[0], "role": user[1]})
                     st.rerun()
-                else: 
-                    st.warning("ACCOUNT PENDING APPROVAL. CONTACT SYSTEM OWNER.")
-            else: 
-                st.error("INVALID CREDENTIALS.")
+                else: st.warning("ACCOUNT PENDING APPROVAL.")
+            else: st.error("INVALID CREDENTIALS.")
             
         if c2.button("REGISTER"):
             st.session_state.view = "REGISTER"
@@ -98,11 +104,11 @@ if not st.session_state.logged_in:
                 try:
                     c.execute("INSERT INTO users VALUES (?,?,?,?,?)", (email, pwd, new_u, "User", "Pending"))
                     conn.commit()
-                    st.success("REQUEST SENT TO ADMIN.")
-                except: st.error("USER ALREADY EXISTS.")
+                    st.success("REQUEST SENT. WAIT FOR ADMIN.")
+                except: st.error("USER EXISTS.")
     st.stop()
 
-# --- 5. SIDEBAR NAVIGATION ---
+# --- 5. SIDEBAR ---
 role = st.session_state.role
 with st.sidebar:
     st.markdown("<h4 style='color:#5865f2; margin: 15px 0 0 20px; font-weight:900;'>GSA HQ</h4>", unsafe_allow_html=True)
@@ -131,20 +137,20 @@ with st.sidebar:
 
 # --- 6. WORKSPACES ---
 
-# MASTER CONTROL: ADMIN ONLY
+# USER MANAGEMENT (Super Admin Only)
 if st.session_state.view == "PERMISSIONS" and role == "Super Admin":
     st.markdown("### USER ACCESS CONTROL")
-    all_users = c.execute("SELECT email, username, role, status FROM users").fetchall()
-    for u_email, u_name, u_role, u_status in all_users:
+    for u_email, u_name, u_role, u_status in c.execute("SELECT email, username, role, status FROM users").fetchall():
         with st.container():
-            col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-            col1.write(f"**{u_name}** ({u_email})")
-            nr = col2.selectbox("Role", ["User", "Admin", "CLPLEAD", "Super Admin"], index=["User", "Admin", "CLPLEAD", "Super Admin"].index(u_role), key=f"r_{u_email}")
-            ns = col3.selectbox("Status", ["Pending", "Approved"], index=["Pending", "Approved"].index(u_status), key=f"s_{u_email}")
-            if col4.button("Update", key=f"u_{u_email}"):
+            c1, c2, c3, c4 = st.columns([2, 1, 1, 1])
+            c1.write(f"**{u_name}** ({u_email})")
+            nr = c2.selectbox("Role", ["User", "Admin", "CLPLEAD", "Super Admin"], index=["User", "Admin", "CLPLEAD", "Super Admin"].index(u_role), key=f"r_{u_email}")
+            ns = c3.selectbox("Status", ["Pending", "Approved"], index=["Pending", "Approved"].index(u_status), key=f"s_{u_email}")
+            if c4.button("Update", key=f"u_{u_email}"):
                 c.execute("UPDATE users SET role=?, status=? WHERE email=?", (nr, ns, u_email))
                 conn.commit(); st.rerun()
 
+# CALENDAR
 elif st.session_state.view == "CALENDAR":
     st.markdown("### 🗓️ TRAINING ROSTER")
     left, right = st.columns([1.5, 1])
@@ -164,6 +170,7 @@ elif st.session_state.view == "CALENDAR":
                 c.execute("INSERT OR REPLACE INTO events (date_val, type) VALUES (?,?)", (st.session_state.sel_date, txt))
                 conn.commit(); st.rerun()
 
+# MOD VIEW
 elif st.session_state.view == "MOD_VIEW":
     mod = c.execute("SELECT * FROM mods WHERE id=?", (st.session_state.active_mod_id,)).fetchone()
     if mod:
@@ -184,6 +191,7 @@ elif st.session_state.view == "MOD_VIEW":
             for u, t, m in c.execute("SELECT user, timestamp, comment FROM comments WHERE mod_id=? ORDER BY id DESC", (mod[0],)).fetchall():
                 st.markdown(f'<div class="chat-msg"><b>{u.upper()}</b> <span style="color:#5865f2">{t}</span><br>{m}</div>', unsafe_allow_html=True)
 
+# LOG MOD
 elif st.session_state.view == "LOG_MOD":
     st.markdown("### LOG NEW PROBLEM")
     with st.form("new_log", border=False):
