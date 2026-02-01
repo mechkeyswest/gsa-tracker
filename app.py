@@ -31,52 +31,16 @@ if "page" not in st.session_state:
 
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
-# --- CUSTOM CSS FOR DARK GREY EDITOR ---
-# Note: Because streamlit-quill uses an iframe, deep styling is tricky.
-# We are setting the container background. If the white persists, it is an iframe limitation,
-# but this CSS targets every accessible part of the editor structure.
+# --- CUSTOM CSS FOR DARK EDITOR (INVERT HACK) ---
 st.markdown("""
     <style>
-        /* Toolbar Background - Dark Grey */
-        .ql-toolbar {
-            background-color: #333333 !important;
-            border-color: #555555 !important;
-            color: white !important;
-        }
-
-        /* Editor Area Background - Dark Grey */
-        .ql-container {
-            background-color: #333333 !important;
-            border-color: #555555 !important;
-            color: white !important;
-        }
-        
-        /* The actual typing area */
-        .ql-editor {
-            background-color: #333333 !important;
-            color: white !important;
-        }
-
-        /* Fix Toolbar Button Icons (Stroke & Fill) */
-        .ql-snow .ql-stroke {
-            stroke: white !important;
-        }
-        .ql-snow .ql-fill {
-            fill: white !important;
-        }
-        .ql-snow .ql-picker {
-            color: white !important;
-        }
-        
-        /* Dropdown options inside toolbar */
-        .ql-picker-options {
-            background-color: #333333 !important;
-            color: white !important;
-        }
-
-        /* Remove the white background from the main iframe container if visible */
+        /* Since streamlit-quill is an iframe, we cannot style the inside directly.
+           The "filter: invert(1)" command turns white to black and black to white.
+           The "hue-rotate" tries to correct the colors of blue buttons so they don't look orange.
+        */
         iframe[title="streamlit_quill.quill"] {
-            background-color: #333333 !important;
+            filter: invert(1) hue-rotate(180deg);
+            background-color: white; /* Needed for invert to have a base to work on */
         }
     </style>
 """, unsafe_allow_html=True)
@@ -128,7 +92,7 @@ if st.session_state.page == "broken_mods":
         assignment = st.text_input("Assign to User")
         st.write("Description (Rich Text):")
         
-        # Dark Grey Text Editor
+        # Text Editor (Inverted via CSS to look dark)
         desc = st_quill(
             placeholder="Describe the issue...", 
             key="new_mod_desc",
