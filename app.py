@@ -12,7 +12,6 @@ SYSTEM_PASSWORD = "001Arma!23"
 
 # --- INITIALIZE STATE ---
 if "role_db" not in st.session_state:
-    # This DB resets on restart. In a real app, you'd connect this to a Google Sheet or Database.
     st.session_state.role_db = {
         "armasupplyguy@gmail.com": "SUPER_ADMIN"
     }
@@ -78,9 +77,7 @@ if not st.session_state.logged_in:
             password_input = st.text_input("System Password", type="password")
             
             if st.button("Login", type="primary"):
-                # Check 1: Is the email in our authorized list?
                 if email_input in st.session_state.role_db:
-                    # Check 2: Is the password correct?
                     if password_input == SYSTEM_PASSWORD:
                         st.session_state.logged_in = True
                         st.session_state.current_user = email_input
@@ -90,15 +87,12 @@ if not st.session_state.logged_in:
                         st.error("Incorrect Password.")
                 else:
                     st.error("Access Denied. Email not authorized.")
-    
-    # Stop the script here if not logged in
     st.stop()
 
 # =========================================================
 #  MAIN APP (Only runs if logged_in is True)
 # =========================================================
 
-# Current Authenticated User
 USER_EMAIL = st.session_state.current_user
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
@@ -236,9 +230,135 @@ elif st.session_state.page == "mod_detail":
     if current_mod:
         st.title(f"Issue: {current_mod['name']}")
         col_report, col_chat = st.columns([2, 1])
+        
         with col_report:
             with st.container(border=True):
                 st.caption(f"Severity: {current_mod['severity']} | Assigned: {current_mod['assignment']}")
+                
+                # Check JSON data existence
                 if current_mod.get('json_data'):
                     st.code(current_mod['json_data'], language='json')
-                st.markdown(current_mod['description'],
+                
+                # Render Description
+                st.markdown(current_mod['description'], unsafe_allow_html=True)
+                
+                st.divider()
+                
+                if not current_mod['complete']:
+                    if st.button("✅ Mark as Resolved", type="primary"):
+                        current_mod['complete'] = True
+                        st.success("Issue resolved! Moved to Fixed dump.")
+                        st.session_state.page = "view_fixed_mods"
+                        st.rerun()
+                else:
+                    st.success("This issue is marked as RESOLVED.")
+                    if st.button("Re-open Issue"):
+                        current_mod['complete'] = False
+                        st.rerun()
+        
+        with col_chat:
+            st.subheader("💬 Discussion")
+            chat_container = st.container(height=400, border=True)
+            for msg in current_mod['discussion']:
+                chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
+                chat_container.caption(f"{msg['time']}")
+                chat_container.divider()
+            with st.form(key="chat_form", clear_on_submit=True):
+                user_msg = st.text_input("Type a message...")
+                submit_chat = st.form_submit_button("Send")
+                if submit_chat and user_msg:
+                    timestamp = datetime.now().strftime("%H:%M")
+                    current_mod['discussion'].append({
+                        "user": USER_EMAIL,
+                        "text": user_msg,
+                        "time": timestamp
+                    })
+                    st.rerun()
+    else:
+        st.error("Mod report not found.")
+
+# --- PAGE: CREATE EVENT ---
+elif st.session_state.page == "create_event":
+    st.title("Create New Event")
+    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
+        with st.container(border=True):
+            e_name = st.text_input("Event Name")
+            e_date = st.date_input("Date")
+            e_time = st.time_input("Time")
+            e_tz = st.selectbox("Timezone", ["UTC", "EST", "PST", "GMT"])
+            e_loc = st.text_input("Location (Server/Discord)")
+            st.write("Event Details (Rich Text):")
+            e_desc = st_quill(key="event_quill_create")
+            if st.button("Publish Event"):
+                st.session_state.events.append({
+                    "name": e_name, "date": str(e_date), "time": str(e_time),
+                    "tz": e_tz, "loc": e_loc, "desc": e_desc
+                })
+                st.success("Event Published!")
+                st.session_state.page = "view_events"
+                st.rerun()
+    else:
+        st.error("You do not have permission to create events.")
+
+# --- PAGE: VIEW EVENTS ---
+elif st.session_state.page == "view_events":
+    st.title("Training & Events Calendar")
+    if not st.session_state.events:
+        st.info("No events scheduled.")
+    for event in st.session_state.events:
+        with st.chat_message("event"):
+            st.write(f"### {event['name']}")
+            st.write(f"🕒 {event['date']} at {event['time']} ({event['tz']}) | 📍 {event['loc']}")
+            st.markdown(event['desc'], unsafe_allow_html=True)
+
+# --- PAGE: CREATE TUTORIAL ---
+elif st.session_state.page == "create_tutorial":
+    st.title("Create New Tutorial")
+    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
+        with st.container(border=True):
+            t_title = st.text_input("Tutorial Title")
+            t_content = st_quill(key="tut_quill_create")
+            if st.button("Save Tutorial"):
+                st.session_state.tutorials.append({"title": t_title, "content": t_content})
+                st.success("Tutorial Saved!")
+                st.session_state.page = "view_tutorials"
+                st.rerun()
+    else:
+        st.error("You do not have permission to create tutorials.")
+
+# --- PAGE: VIEW TUTORIALS ---
+elif st.session_state.page == "view_tutorials":
+    st.title("Tutorials Library")
+    if not st.session_state.tutorials:
+        st.info("No tutorials available.")
+    for tut in st.session_state.tutorials:
+        with st.container(border=True):
+            st.subheader(tut['title'])
+            st.markdown(tut['content'], unsafe_allow_html=True)
+
+# --- PAGE: VIEW USERS ---
+elif st.session_state.page == "view_users":
+    st.title("Staff Roster & Online Status")
+    for email, role in st.session_state.role_db.items():
+        with st.container(border=True):
+            col_avatar, col_info, col_status = st.columns([1, 4, 2])
+            with col_avatar:
+                st.write("👤") 
+            with col_info:
+                st.subheader(email)
+                st.caption(f"Role: {role}")
+            with col_status:
+                if email == USER_EMAIL:
+                    st.success("🟢 Online")
+                else:
+                    st.write("⚪ Offline")
+
+# --- PAGE: ROLE MANAGEMENT ---
+elif st.session_state.page == "roles":
+    st.title("Super Admin: Role Management")
+    new_email = st.text_input("User Email")
+    new_role = st.selectbox("Assign Role", ["admin", "CLPLEAD", "CLP"])
+    if st.button("Update Role"):
+        st.session_state.role_db[new_email] = new_role
+        st.success(f"Updated {new_email} to {new_role}")
+    st.table(pd.DataFrame(st.session_state.role_db.items(), columns=["Email", "Role"]))
