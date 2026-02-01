@@ -45,16 +45,32 @@ def navigate_to(page_name, mod_id=None):
     st.session_state.page = page_name
     st.session_state.selected_mod_id = mod_id
 
-# --- AGGRESSIVE DARK MODE CSS ---
+# --- CSS: AGGRESSIVE DARK MODE & STICKY HEADER ---
 st.markdown("""
     <style>
+        /* Invert Iframes for Dark Text Editor */
         .stMain iframe {
             filter: invert(1) hue-rotate(180deg);
         }
         .stMain iframe img {
             filter: invert(1) hue-rotate(180deg);
         }
-        /* Style for the top navigation buttons to look like tabs */
+        
+        /* STICKY TOP MENU
+           We target the first horizontal block (the nav bar) and stick it.
+           'top: 2.875rem' accounts for the standard Streamlit header bar.
+        */
+        div[data-testid="stHorizontalBlock"] {
+            position: sticky;
+            top: 2.875rem; 
+            z-index: 999;
+            background-color: #0e1117; /* Matches standard dark theme background */
+            padding-bottom: 10px;
+            padding-top: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        /* Nav Button Styling */
         div[data-testid="stHorizontalBlock"] button {
             width: 100%;
             border-radius: 0px;
@@ -76,7 +92,7 @@ def get_mod_status():
     incomplete = any(not m['complete'] for m in st.session_state.mods)
     return "🔴" if incomplete else "🟢"
 
-# --- SIDEBAR MENU ---
+# --- SIDEBAR MENU (CREATION CENTER) ---
 st.sidebar.title("🛠 Staff Portal")
 st.sidebar.write(f"Logged in as: **{USER_EMAIL}**")
 st.sidebar.divider()
@@ -86,35 +102,21 @@ if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     mod_light = get_mod_status()
     
-    # Main Button: Report Broken Mod
+    # Action: Report Broken Mod
     st.sidebar.button(
         f"{mod_light} Report Broken Mod", 
         on_click=navigate_to, 
         args=("report_broken_mod", None)
     )
-
-    # Sub-Menu: List Active Broken Mods
-    st.sidebar.markdown("---")
-    st.sidebar.caption("ACTIVE ISSUES")
-    active_mods = [m for m in st.session_state.mods if not m['complete']]
-    
-    if not active_mods:
-        st.sidebar.info("No active issues.")
-    
-    for mod in active_mods:
-        st.sidebar.button(
-            f"🔸 {mod['name']}", 
-            key=f"sidebar_link_{mod['id']}",
-            on_click=navigate_to,
-            args=("mod_detail", mod['id'])
-        )
+    # NOTE: Removed the list of active mods from sidebar as requested
 
 # Category: CLP Management
 st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
-    st.sidebar.button("📅 Events", on_click=navigate_to, args=("events",))
-    # CHANGE: Renamed to "Create Tutorial"
-    st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("tutorials",))
+    # Action: Create Event (Leads Only)
+    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
+        st.sidebar.button("📅 Create Event", on_click=navigate_to, args=("create_event",))
+        st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("create_tutorial",))
 
 # Super Admin Only
 if user_role == "SUPER_ADMIN":
@@ -122,22 +124,22 @@ if user_role == "SUPER_ADMIN":
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
 
 
-# --- TOP LEVEL NAVIGATION (MAIN PAGE) ---
-st.markdown("###") # Spacer
+# --- TOP LEVEL NAVIGATION (READ ONLY VIEWS) ---
+# This block is sticky thanks to the CSS above
 nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
 
 with nav_col1:
     st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
 with nav_col2:
-    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("tutorials",))
+    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
 with nav_col3:
-    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("training_schedules",))
+    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
 with nav_col4:
-    st.button("Events", use_container_width=True, on_click=navigate_to, args=("events",))
+    st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
 
-st.divider()
+st.markdown("---") # Visual separator between sticky header and content
 
-# --- PAGE: REPORT BROKEN MOD (CREATION FORM) ---
+# --- PAGE: REPORT BROKEN MOD (FORM) ---
 if st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     
@@ -163,9 +165,10 @@ if st.session_state.page == "report_broken_mod":
                 "discussion": [] 
             })
             st.success("Report Submitted!")
+            st.session_state.page = "view_broken_mods" # Auto-redirect to list
             st.rerun()
 
-# --- PAGE: VIEW BROKEN MODS (TOP NAV LIST VIEW) ---
+# --- PAGE: VIEW BROKEN MODS (LIST) ---
 elif st.session_state.page == "view_broken_mods":
     st.title("Active Broken Mods")
     active_mods = [m for m in st.session_state.mods if not m['complete']]
@@ -230,22 +233,18 @@ elif st.session_state.page == "mod_detail":
     else:
         st.error("Mod report not found.")
 
-# --- PAGE: EVENTS (Shared View for 'Events' and 'Training Schedules') ---
-elif st.session_state.page in ["events", "training_schedules"]:
-    # Determine Title based on which button was clicked
-    page_title = "Training Schedules" if st.session_state.page == "training_schedules" else "CLP Events Calendar"
-    st.title(page_title)
-    
-    # Creation Form (Only visible to Leads/Admins)
+# --- PAGE: CREATE EVENT (FORM ONLY) ---
+elif st.session_state.page == "create_event":
+    st.title("Create New Event")
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
-        with st.expander("📅 Create New Event"):
+        with st.container(border=True):
             e_name = st.text_input("Event Name")
             e_date = st.date_input("Date")
             e_time = st.time_input("Time")
             e_tz = st.selectbox("Timezone", ["UTC", "EST", "PST", "GMT"])
             e_loc = st.text_input("Location (Server/Discord)")
             st.write("Event Details (Rich Text):")
-            e_desc = st_quill(key="event_quill")
+            e_desc = st_quill(key="event_quill_create")
             
             if st.button("Publish Event"):
                 st.session_state.events.append({
@@ -253,28 +252,46 @@ elif st.session_state.page in ["events", "training_schedules"]:
                     "tz": e_tz, "loc": e_loc, "desc": e_desc
                 })
                 st.success("Event Published!")
+                st.session_state.page = "view_events" # Auto-redirect to list
+                st.rerun()
+    else:
+        st.error("You do not have permission to create events.")
 
-    # List all daily events
+# --- PAGE: VIEW EVENTS (READ ONLY LIST) ---
+elif st.session_state.page == "view_events":
+    st.title("Training & Events Calendar")
+    
+    if not st.session_state.events:
+        st.info("No events scheduled.")
+    
     for event in st.session_state.events:
         with st.chat_message("event"):
             st.write(f"### {event['name']}")
             st.write(f"🕒 {event['date']} at {event['time']} ({event['tz']}) | 📍 {event['loc']}")
             st.markdown(event['desc'], unsafe_allow_html=True)
 
-# --- PAGE: TUTORIALS ---
-elif st.session_state.page == "tutorials":
-    st.title("Tutorials Library")
-    
-    # Creation Form (Only visible to Leads/Admins)
+# --- PAGE: CREATE TUTORIAL (FORM ONLY) ---
+elif st.session_state.page == "create_tutorial":
+    st.title("Create New Tutorial")
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
-        with st.expander("📝 Create New Tutorial"):
+        with st.container(border=True):
             t_title = st.text_input("Tutorial Title")
-            t_content = st_quill(key="tut_quill")
+            t_content = st_quill(key="tut_quill_create")
             if st.button("Save Tutorial"):
                 st.session_state.tutorials.append({"title": t_title, "content": t_content})
+                st.success("Tutorial Saved!")
+                st.session_state.page = "view_tutorials" # Auto-redirect to list
                 st.rerun()
+    else:
+        st.error("You do not have permission to create tutorials.")
+
+# --- PAGE: VIEW TUTORIALS (READ ONLY LIST) ---
+elif st.session_state.page == "view_tutorials":
+    st.title("Tutorials Library")
     
-    # List Published Tutorials
+    if not st.session_state.tutorials:
+        st.info("No tutorials available.")
+
     for tut in st.session_state.tutorials:
         with st.container(border=True):
             st.subheader(tut['title'])
