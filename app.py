@@ -7,7 +7,6 @@ from datetime import datetime
 st.set_page_config(page_title="Arma Staff Portal", layout="wide")
 
 # Mock User Login (In a real app, use Streamlit Authenticator)
-# For now, we simulate you are logged in
 USER_EMAIL = "armasupplyguy@gmail.com"
 
 if "role_db" not in st.session_state:
@@ -27,7 +26,48 @@ if "events" not in st.session_state:
 if "tutorials" not in st.session_state:
     st.session_state.tutorials = []
 
+if "page" not in st.session_state:
+    st.session_state.page = "broken_mods"
+
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
+
+# --- CUSTOM CSS FOR DARK EDITOR ---
+st.markdown("""
+    <style>
+        /* Target the Quill editor container */
+        .stQuill {
+            background-color: #333333 !important;
+            color: white !important;
+            border-radius: 5px;
+        }
+        /* Style the toolbar to be dark grey */
+        .ql-toolbar {
+            background-color: #444444 !important;
+            border-color: #555555 !important;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+        }
+        /* Ensure toolbar icons are visible */
+        .ql-snow .ql-stroke {
+            stroke: #ffffff !important;
+        }
+        .ql-snow .ql-fill {
+            fill: #ffffff !important;
+        }
+        .ql-snow .ql-picker {
+            color: #ffffff !important;
+        }
+        /* Container borders */
+        .ql-container {
+            border-color: #555555 !important;
+            background-color: #333333 !important;
+        }
+        /* Text color inside editor */
+        .ql-editor {
+            color: white !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
 # --- HELPER: SIDEBAR LIGHT LOGIC ---
 def get_mod_status():
@@ -41,8 +81,6 @@ st.sidebar.title("🛠 Staff Portal")
 st.sidebar.write(f"Logged in as: **{USER_EMAIL}**")
 st.sidebar.divider()
 
-menu_options = []
-
 # Category: Server Admin
 if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
@@ -50,7 +88,7 @@ if user_role in ["admin", "SUPER_ADMIN"]:
     if st.sidebar.button(f"{mod_light} Broken Mods"):
         st.session_state.page = "broken_mods"
 
-# Category: CLP LEAD
+# Category: CLP Management
 st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
     if st.sidebar.button("📅 Events"):
@@ -65,20 +103,35 @@ if user_role == "SUPER_ADMIN":
         st.session_state.page = "roles"
 
 # --- PAGE: BROKEN MODS ---
-if st.session_state.get("page") == "broken_mods":
+if st.session_state.page == "broken_mods":
     st.title("Broken Mods Tracker")
     
     with st.expander("➕ Report New Broken Mod"):
         name = st.text_input("Mod Name")
+        
+        # New Field: JSON Code Spot
+        mod_json = st.text_area("Mod JSON Code", help="Paste JSON configuration here", height=100)
+        
         severity = st.select_slider("Severity", options=range(1, 11))
         assignment = st.text_input("Assign to User")
         st.write("Description (Rich Text):")
-        desc = st_quill(placeholder="Describe the issue...", key="new_mod_desc")
+        
+        # Dark Grey Text Editor
+        desc = st_quill(
+            placeholder="Describe the issue...", 
+            key="new_mod_desc",
+            html=True
+        )
         
         if st.button("Add to List"):
             st.session_state.mods.append({
-                "name": name, "severity": severity, "assignment": assignment,
-                "description": desc, "complete": False, "id": len(st.session_state.mods)
+                "name": name, 
+                "json_data": mod_json,
+                "severity": severity, 
+                "assignment": assignment,
+                "description": desc, 
+                "complete": False, 
+                "id": len(st.session_state.mods)
             })
             st.rerun()
 
@@ -87,19 +140,26 @@ if st.session_state.get("page") == "broken_mods":
             col1, col2 = st.columns([4, 1])
             with col1:
                 st.subheader(f"{'✅' if mod['complete'] else '❌'} {mod['name']}")
+                
+                # Display JSON Code field if it exists
+                if mod.get('json_data'):
+                    st.code(mod['json_data'], language='json')
+                
                 st.markdown(mod['description'], unsafe_allow_html=True)
                 st.caption(f"Assigned to: {mod['assignment']} | Severity: {mod['severity']}")
             with col2:
-                if st.checkbox("Complete", value=mod['complete'], key=f"check_{i}"):
-                    st.session_state.mods[i]['complete'] = True
-                else:
-                    st.session_state.mods[i]['complete'] = False
+                # Update completion status
+                is_done = st.checkbox("Complete", value=mod['complete'], key=f"check_{i}")
+                if is_done != mod['complete']:
+                    st.session_state.mods[i]['complete'] = is_done
+                    st.rerun()
+                    
                 if st.button("🗑️", key=f"del_{i}"):
                     st.session_state.mods.pop(i)
                     st.rerun()
 
 # --- PAGE: EVENTS ---
-elif st.session_state.get("page") == "events":
+elif st.session_state.page == "events":
     st.title("CLP Events Calendar")
     
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
@@ -125,13 +185,10 @@ elif st.session_state.get("page") == "events":
             st.write(f"🕒 {event['date']} at {event['time']} ({event['tz']}) | 📍 {event['loc']}")
             st.markdown(event['desc'], unsafe_allow_html=True)
 
-# --- PAGE: ROLE MANAGEMENT ---
-elif st.session_state.get("page") == "roles":
-    st.title("Super Admin: Role Management")
-    new_email = st.text_input("User Email")
-    new_role = st.selectbox("Assign Role", ["admin", "CLPLEAD", "CLP"])
-    if st.button("Update Role"):
-        st.session_state.role_db[new_email] = new_role
-        st.success(f"Updated {new_email} to {new_role}")
-    
-    st.table(pd.DataFrame(st.session_state.role_db.items(), columns=["Email", "Role"]))
+# --- PAGE: TUTORIALS ---
+elif st.session_state.page == "tutorials":
+    st.title("Tutorials")
+    if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
+        with st.expander("📝 Create New Tutorial"):
+            t_title = st.text_input("Tutorial Title")
+            t_content = st_quill(key="tut_quill")
