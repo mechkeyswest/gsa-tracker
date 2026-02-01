@@ -11,7 +11,6 @@ USER_EMAIL = "armasupplyguy@gmail.com"
 
 # --- INITIALIZE STATE ---
 if "role_db" not in st.session_state:
-    # CLEAN DB: Only you exist initially. Add others via "Assign Roles".
     st.session_state.role_db = {
         "armasupplyguy@gmail.com": "SUPER_ADMIN"
     }
@@ -118,18 +117,20 @@ if user_role == "SUPER_ADMIN":
 
 
 # --- TOP LEVEL NAVIGATION (READ ONLY VIEWS) ---
-# Added 5th column for "Users"
-nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns(5)
+# Added 6th column for "Fixed"
+nav_col1, nav_col2, nav_col3, nav_col4, nav_col5, nav_col6 = st.columns(6)
 
 with nav_col1:
     st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
 with nav_col2:
-    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
+    st.button("Fixed", use_container_width=True, on_click=navigate_to, args=("view_fixed_mods",))
 with nav_col3:
-    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
+    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("view_tutorials",))
 with nav_col4:
-    st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
+    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("view_events",))
 with nav_col5:
+    st.button("Events", use_container_width=True, on_click=navigate_to, args=("view_events",))
+with nav_col6:
     st.button("Users", use_container_width=True, on_click=navigate_to, args=("view_users",))
 
 st.markdown("---") 
@@ -180,6 +181,24 @@ elif st.session_state.page == "view_broken_mods":
                 with c2:
                     st.button("View Details", key=f"view_btn_{mod['id']}", on_click=navigate_to, args=("mod_detail", mod['id']))
 
+# --- PAGE: VIEW FIXED MODS (LIST) ---
+elif st.session_state.page == "view_fixed_mods":
+    st.title("Resolved Issues Archive")
+    fixed_mods = [m for m in st.session_state.mods if m['complete']]
+    
+    if not fixed_mods:
+        st.info("No resolved issues yet.")
+    else:
+        for mod in fixed_mods:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1])
+                with c1:
+                    st.subheader(f"✅ {mod['name']}")
+                    st.caption(f"Resolved | Original Severity: {mod['severity']}")
+                with c2:
+                    # Allow viewing history of fixed mods too
+                    st.button("View Archive", key=f"view_fixed_btn_{mod['id']}", on_click=navigate_to, args=("mod_detail", mod['id']))
+
 # --- PAGE: MOD DETAIL & CHAT ---
 elif st.session_state.page == "mod_detail":
     current_mod = next((m for m in st.session_state.mods if m['id'] == st.session_state.selected_mod_id), None)
@@ -200,10 +219,19 @@ elif st.session_state.page == "mod_detail":
                 
                 st.divider()
                 
-                is_complete = st.checkbox("Mark as Resolved", value=current_mod['complete'])
-                if is_complete != current_mod['complete']:
-                    current_mod['complete'] = is_complete
-                    st.rerun()
+                # --- CHANGE: BUTTON INSTEAD OF CHECKBOX ---
+                if not current_mod['complete']:
+                    if st.button("✅ Mark as Resolved", type="primary"):
+                        current_mod['complete'] = True
+                        st.success("Issue resolved! Moved to Fixed dump.")
+                        st.session_state.page = "view_fixed_mods" # Redirect to Fixed dump
+                        st.rerun()
+                else:
+                    st.success("This issue is marked as RESOLVED.")
+                    # Optional: Ability to reopen
+                    if st.button("Re-open Issue"):
+                        current_mod['complete'] = False
+                        st.rerun()
 
         with col_chat:
             st.subheader("💬 Discussion")
@@ -296,20 +324,18 @@ elif st.session_state.page == "view_tutorials":
 elif st.session_state.page == "view_users":
     st.title("Staff Roster & Online Status")
     
-    # Simple roster view from the database
     for email, role in st.session_state.role_db.items():
         with st.container(border=True):
             col_avatar, col_info, col_status = st.columns([1, 4, 2])
             
             with col_avatar:
-                st.write("👤") # Placeholder avatar
+                st.write("👤") 
                 
             with col_info:
                 st.subheader(email)
                 st.caption(f"Role: {role}")
                 
             with col_status:
-                # Simulation: Since this is a script, only YOU are technically "online" in this session.
                 if email == USER_EMAIL:
                     st.success("🟢 Online")
                 else:
