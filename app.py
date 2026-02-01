@@ -34,7 +34,6 @@ if "selected_mod_id" not in st.session_state:
     st.session_state.selected_mod_id = None
 
 # --- SAFETY CHECK: AUTO-FIX MISSING DATA ---
-# This runs on every reload to ensure no "KeyError" ever happens again.
 for mod in st.session_state.mods:
     if "discussion" not in mod:
         mod["discussion"] = []
@@ -42,7 +41,6 @@ for mod in st.session_state.mods:
 user_role = st.session_state.role_db.get(USER_EMAIL, "CLP")
 
 # --- NAVIGATION CALLBACK FUNCTION ---
-# This fixes the "Button does nothing" issue by forcing the state update immediately.
 def navigate_to(page_name, mod_id=None):
     st.session_state.page = page_name
     st.session_state.selected_mod_id = mod_id
@@ -55,6 +53,18 @@ st.markdown("""
         }
         .stMain iframe img {
             filter: invert(1) hue-rotate(180deg);
+        }
+        /* Style for the top navigation buttons to look like tabs */
+        div[data-testid="stHorizontalBlock"] button {
+            width: 100%;
+            border-radius: 0px;
+            border: 1px solid #333;
+            background-color: #222;
+            color: white;
+        }
+        div[data-testid="stHorizontalBlock"] button:hover {
+            border-color: #555;
+            color: #4CAF50;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -76,7 +86,7 @@ if user_role in ["admin", "SUPER_ADMIN"]:
     st.sidebar.subheader("Server Admin")
     mod_light = get_mod_status()
     
-    # Main Button: Report Broken Mod (Using Callback)
+    # Main Button: Report Broken Mod
     st.sidebar.button(
         f"{mod_light} Report Broken Mod", 
         on_click=navigate_to, 
@@ -92,7 +102,6 @@ if user_role in ["admin", "SUPER_ADMIN"]:
         st.sidebar.info("No active issues.")
     
     for mod in active_mods:
-        # Link to specific mod (Using Callback)
         st.sidebar.button(
             f"🔸 {mod['name']}", 
             key=f"sidebar_link_{mod['id']}",
@@ -104,14 +113,31 @@ if user_role in ["admin", "SUPER_ADMIN"]:
 st.sidebar.subheader("CLP Management")
 if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
     st.sidebar.button("📅 Events", on_click=navigate_to, args=("events",))
-    st.sidebar.button("📚 Tutorials", on_click=navigate_to, args=("tutorials",))
+    # CHANGE: Renamed to "Create Tutorial"
+    st.sidebar.button("📚 Create Tutorial", on_click=navigate_to, args=("tutorials",))
 
 # Super Admin Only
 if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
 
-# --- PAGE: REPORT BROKEN MOD (LANDING) ---
+
+# --- TOP LEVEL NAVIGATION (MAIN PAGE) ---
+st.markdown("###") # Spacer
+nav_col1, nav_col2, nav_col3, nav_col4 = st.columns(4)
+
+with nav_col1:
+    st.button("Broken Mods", use_container_width=True, on_click=navigate_to, args=("view_broken_mods",))
+with nav_col2:
+    st.button("Tutorials", use_container_width=True, on_click=navigate_to, args=("tutorials",))
+with nav_col3:
+    st.button("Training Schedules", use_container_width=True, on_click=navigate_to, args=("training_schedules",))
+with nav_col4:
+    st.button("Events", use_container_width=True, on_click=navigate_to, args=("events",))
+
+st.divider()
+
+# --- PAGE: REPORT BROKEN MOD (CREATION FORM) ---
 if st.session_state.page == "report_broken_mod":
     st.title("Report Broken Mod")
     
@@ -139,9 +165,25 @@ if st.session_state.page == "report_broken_mod":
             st.success("Report Submitted!")
             st.rerun()
 
+# --- PAGE: VIEW BROKEN MODS (TOP NAV LIST VIEW) ---
+elif st.session_state.page == "view_broken_mods":
+    st.title("Active Broken Mods")
+    active_mods = [m for m in st.session_state.mods if not m['complete']]
+    
+    if not active_mods:
+        st.success("All systems operational. No broken mods reported.")
+    else:
+        for mod in active_mods:
+            with st.container(border=True):
+                c1, c2 = st.columns([5,1])
+                with c1:
+                    st.subheader(f"⚠️ {mod['name']}")
+                    st.caption(f"Severity: {mod['severity']} | Assigned: {mod['assignment']}")
+                with c2:
+                    st.button("View Details", key=f"view_btn_{mod['id']}", on_click=navigate_to, args=("mod_detail", mod['id']))
+
 # --- PAGE: MOD DETAIL & CHAT ---
 elif st.session_state.page == "mod_detail":
-    # Find the specific mod
     current_mod = next((m for m in st.session_state.mods if m['id'] == st.session_state.selected_mod_id), None)
     
     if current_mod:
@@ -149,7 +191,6 @@ elif st.session_state.page == "mod_detail":
         
         col_report, col_chat = st.columns([2, 1])
         
-        # LEFT COLUMN: THE REPORT
         with col_report:
             with st.container(border=True):
                 st.caption(f"Severity: {current_mod['severity']} | Assigned: {current_mod['assignment']}")
@@ -161,16 +202,13 @@ elif st.session_state.page == "mod_detail":
                 
                 st.divider()
                 
-                # Completion Checkbox
                 is_complete = st.checkbox("Mark as Resolved", value=current_mod['complete'])
                 if is_complete != current_mod['complete']:
                     current_mod['complete'] = is_complete
                     st.rerun()
 
-        # RIGHT COLUMN: DISCUSSION CHAT
         with col_chat:
             st.subheader("💬 Discussion")
-            
             chat_container = st.container(height=400, border=True)
             for msg in current_mod['discussion']:
                 chat_container.markdown(f"**{msg['user']}**: {msg['text']}")
@@ -192,10 +230,13 @@ elif st.session_state.page == "mod_detail":
     else:
         st.error("Mod report not found.")
 
-# --- PAGE: EVENTS ---
-elif st.session_state.page == "events":
-    st.title("CLP Events Calendar")
+# --- PAGE: EVENTS (Shared View for 'Events' and 'Training Schedules') ---
+elif st.session_state.page in ["events", "training_schedules"]:
+    # Determine Title based on which button was clicked
+    page_title = "Training Schedules" if st.session_state.page == "training_schedules" else "CLP Events Calendar"
+    st.title(page_title)
     
+    # Creation Form (Only visible to Leads/Admins)
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
         with st.expander("📅 Create New Event"):
             e_name = st.text_input("Event Name")
@@ -213,6 +254,7 @@ elif st.session_state.page == "events":
                 })
                 st.success("Event Published!")
 
+    # List all daily events
     for event in st.session_state.events:
         with st.chat_message("event"):
             st.write(f"### {event['name']}")
@@ -221,7 +263,9 @@ elif st.session_state.page == "events":
 
 # --- PAGE: TUTORIALS ---
 elif st.session_state.page == "tutorials":
-    st.title("Tutorials")
+    st.title("Tutorials Library")
+    
+    # Creation Form (Only visible to Leads/Admins)
     if user_role in ["CLPLEAD", "SUPER_ADMIN"]:
         with st.expander("📝 Create New Tutorial"):
             t_title = st.text_input("Tutorial Title")
@@ -230,6 +274,7 @@ elif st.session_state.page == "tutorials":
                 st.session_state.tutorials.append({"title": t_title, "content": t_content})
                 st.rerun()
     
+    # List Published Tutorials
     for tut in st.session_state.tutorials:
         with st.container(border=True):
             st.subheader(tut['title'])
