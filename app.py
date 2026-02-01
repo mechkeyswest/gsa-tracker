@@ -474,19 +474,18 @@ elif st.session_state.page == "json_editor":
                 if not filtered: st.info("No saved mods.")
                 for mod in filtered:
                     with st.container(border=True):
-                        # CONDENSED LIBRARY VIEW
-                        c1, c2, c3, c4 = st.columns([6, 1, 1, 1])
+                        # UPDATED UI: Text Buttons instead of Icons
+                        c_info, c_add, c_copy, c_del = st.columns([5, 1.2, 1.2, 1.2])
                         
                         # Mod Name
-                        with c1:
+                        with c_info:
                             st.write(f"**{mod['name']}**")
-                            # Preparing JSON for copy
                             mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
                             json_str = json.dumps(mini_json, indent=4)
 
-                        # Add Button
-                        with c2:
-                            if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor"):
+                        # ADD Button
+                        with c_add:
+                            if st.button("ADD", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
                                 snippet = json_str
                                 cur = st.session_state.editor_content.strip()
                                 if not cur: cur = "[]"
@@ -498,15 +497,15 @@ elif st.session_state.page == "json_editor":
                                 st.session_state.main_json_editor = new_s
                                 st.rerun()
                         
-                        # Copy Button (Using Popover to hide code)
-                        with c3:
-                            with st.popover("📋", help="Copy JSON"):
+                        # COPY Button
+                        with c_copy:
+                            with st.popover("COPY", use_container_width=True):
                                 st.code(json_str, language='json')
-                                st.caption("Click the icon in the top-right of the box above to copy.")
+                                st.caption("Click the copy icon above.")
 
-                        # Delete Button
-                        with c4:
-                            if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library"):
+                        # DEL Button
+                        with c_del:
+                            if st.button("DEL", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
                                 idx = DB['mod_library'].index(mod)
                                 DB['mod_library'].pop(idx)
                                 save_db(DB)
