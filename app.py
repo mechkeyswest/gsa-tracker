@@ -375,13 +375,12 @@ elif st.session_state.page == "json_editor":
     else:
         col_editor, col_tools = st.columns([2, 1])
         
+        # --- LEFT COLUMN: EDITOR ---
         with col_editor:
-            # --- CONFIG MANAGER ---
             with st.container(border=True):
                 st.subheader("📁 Configuration File Manager")
                 c_load, c_save = st.columns(2)
                 
-                # LOAD
                 with c_load:
                     config_names = [c['name'] for c in DB.get('server_configs', [])]
                     selected_conf = st.selectbox("Load Saved Config", ["Select..."] + config_names)
@@ -393,7 +392,6 @@ elif st.session_state.page == "json_editor":
                             st.success(f"Loaded '{selected_conf}'!")
                             st.rerun()
                 
-                # SAVE
                 with c_save:
                     new_conf_name = st.text_input("Save Current as...")
                     if st.button("💾 Save as Preset") and new_conf_name:
@@ -413,140 +411,128 @@ elif st.session_state.page == "json_editor":
             st.divider()
             st.subheader("Active JSON Editor")
             st.caption("Press 'Ctrl+A' then 'Ctrl+C' inside the box to copy everything.")
-            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
+            # Height 700 matches the right container
+            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=700, key="main_json_editor")
             st.session_state.editor_content = json_text
 
+        # --- RIGHT COLUMN: TOOLS & LIBRARY ---
         with col_tools:
-            # Added "Import" Tab here
-            tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
-            
-            with tab_search:
-                st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
-                search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
-                if search_term:
-                    st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
+            # THIS CONTAINER PROVIDES THE SCROLLABLE WINDOW EFFECT
+            with st.container(height=950, border=True):
+                tab_search, tab_saved, tab_import = st.tabs(["🌐 Search", "💾 Library", "📥 Import"])
                 
-                st.divider()
-                st.write("**2. Paste Workshop URL**")
-                fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
-                
-                if st.button("🚀 Fetch Details"):
-                    if fetch_url:
-                        mid, mname, mimg, mver = fetch_mod_details(fetch_url)
-                        if mname:
-                            st.session_state.fetched_mod = {
-                                "modId": mid, "name": mname, "version": mver, "image_url": mimg
-                            }
-                            st.success("Found!")
-                        else: st.error("Could not find mod. Check URL.")
-                
-                if st.session_state.fetched_mod:
-                    mod = st.session_state.fetched_mod
-                    with st.container(border=True):
-                        if mod['image_url']: st.image(mod['image_url'])
-                        st.subheader(mod['name'])
-                        
-                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
-                        st.code(json.dumps(clean_mod, indent=4), language='json')
-                        
-                        c1, c2 = st.columns(2)
-                        with c1:
-                            if st.button("💾 Save to Library"):
-                                DB['mod_library'].append(mod)
-                                save_db(DB)
-                                st.success("Saved!")
-                        with c2:
-                            if st.button("➕ Add to Editor"):
-                                snippet = json.dumps(clean_mod, indent=4)
-                                cur = st.session_state.editor_content.strip()
-                                if not cur: cur = "[]"
-                                if cur.endswith("]"): 
-                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
-                                    else: new_s = "[\n" + snippet + "\n]"
-                                else: new_s = cur + ",\n" + snippet
-                                st.session_state.editor_content = new_s
-                                st.session_state.main_json_editor = new_s
-                                st.rerun()
-
-            with tab_saved:
-                lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
-                filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
-                
-                if not filtered: st.info("No saved mods.")
-                for mod in filtered:
-                    with st.container(border=True):
-                        c_info, c_add, c_copy, c_del = st.columns([3, 1, 1, 1], vertical_alignment="center")
-                        
-                        with c_info:
-                            st.write(f"**{mod['name']}**")
-                            mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
-                            json_str = json.dumps(mini_json, indent=4)
-
-                        with c_add:
-                            if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
-                                snippet = json_str
-                                cur = st.session_state.editor_content.strip()
-                                if not cur: cur = "[]"
-                                if cur.endswith("]"): 
-                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
-                                    else: new_s = "[\n" + snippet + "\n]"
-                                else: new_s = cur + ",\n" + snippet
-                                st.session_state.editor_content = new_s
-                                st.session_state.main_json_editor = new_s
-                                st.rerun()
-                        
-                        with c_copy:
-                            with st.popover("📋", use_container_width=True):
-                                st.code(json_str, language='json')
-                                st.caption("Click the icon in the corner to copy.")
-
-                        with c_del:
-                            if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
-                                idx = DB['mod_library'].index(mod)
-                                DB['mod_library'].pop(idx)
-                                save_db(DB)
-                                st.rerun()
-            
-            # --- TAB 3: IMPORT ---
-            with tab_import:
-                st.subheader("Batch Importer")
-                st.caption("Paste a full JSON file or a list of mods. We will extract every mod block and save it to your library.")
-                import_text = st.text_area("Paste JSON Here", height=300)
-                
-                if st.button("Process & Import Mods", type="primary"):
-                    try:
-                        # 1. Regex to find {"modId": "..." ...} blocks
-                        # We look for simple structure patterns to avoid strict JSON errors
-                        pattern = r'\{[^{}]*"modId"[^{}]*\}'
-                        matches = re.findall(pattern, import_text, re.DOTALL)
-                        
-                        count_added = 0
-                        existing_ids = [m['modId'] for m in DB['mod_library']]
-                        
-                        for match in matches:
-                            try:
-                                mod_obj = json.loads(match)
-                                mid = mod_obj.get("modId")
-                                mname = mod_obj.get("name", "Unknown Imported Mod")
-                                mver = mod_obj.get("version", "")
-                                
-                                if mid and mid not in existing_ids:
-                                    DB['mod_library'].append({
-                                        "modId": mid,
-                                        "name": mname,
-                                        "version": mver
-                                    })
-                                    existing_ids.append(mid)
-                                    count_added += 1
-                            except:
-                                pass # skip bad blocks
-                        
-                        if count_added > 0:
-                            save_db(DB)
-                            st.success(f"Successfully imported {count_added} new mods to Library!")
-                            st.rerun()
-                        else:
-                            st.warning("No new mods found (or all were duplicates).")
+                with tab_search:
+                    st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
+                    search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
+                    if search_term:
+                        st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
+                    
+                    st.divider()
+                    st.write("**2. Paste Workshop URL**")
+                    fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
+                    
+                    if st.button("🚀 Fetch Details"):
+                        if fetch_url:
+                            mid, mname, mimg, mver = fetch_mod_details(fetch_url)
+                            if mname:
+                                st.session_state.fetched_mod = {
+                                    "modId": mid, "name": mname, "version": mver, "image_url": mimg
+                                }
+                                st.success("Found!")
+                            else: st.error("Could not find mod. Check URL.")
+                    
+                    if st.session_state.fetched_mod:
+                        mod = st.session_state.fetched_mod
+                        with st.container(border=True):
+                            if mod['image_url']: st.image(mod['image_url'])
+                            st.subheader(mod['name'])
                             
-                    except Exception as e:
-                        st.error(f"Error processing text: {e}")
+                            clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                            st.code(json.dumps(clean_mod, indent=4), language='json')
+                            
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                if st.button("💾 Save to Library"):
+                                    DB['mod_library'].append(mod)
+                                    save_db(DB)
+                                    st.success("Saved!")
+                            with c2:
+                                if st.button("➕ Add to Editor"):
+                                    snippet = json.dumps(clean_mod, indent=4)
+                                    cur = st.session_state.editor_content.strip()
+                                    if not cur: cur = "[]"
+                                    if cur.endswith("]"): 
+                                        if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                        else: new_s = "[\n" + snippet + "\n]"
+                                    else: new_s = cur + ",\n" + snippet
+                                    st.session_state.editor_content = new_s
+                                    st.session_state.main_json_editor = new_s
+                                    st.rerun()
+
+                with tab_saved:
+                    lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
+                    filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
+                    
+                    if not filtered: st.info("No saved mods.")
+                    for mod in filtered:
+                        with st.container(border=True):
+                            c_info, c_add, c_copy, c_del = st.columns([3, 1, 1, 1], vertical_alignment="center")
+                            
+                            with c_info:
+                                st.write(f"**{mod['name']}**")
+                                mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                                json_str = json.dumps(mini_json, indent=4)
+
+                            with c_add:
+                                if st.button("➕", key=f"ins_{mod['modId']}", help="Insert into Editor", use_container_width=True):
+                                    snippet = json_str
+                                    cur = st.session_state.editor_content.strip()
+                                    if not cur: cur = "[]"
+                                    if cur.endswith("]"): 
+                                        if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                        else: new_s = "[\n" + snippet + "\n]"
+                                    else: new_s = cur + ",\n" + snippet
+                                    st.session_state.editor_content = new_s
+                                    st.session_state.main_json_editor = new_s
+                                    st.rerun()
+                            
+                            with c_copy:
+                                with st.popover("📋", use_container_width=True):
+                                    st.code(json_str, language='json')
+                                    st.caption("Click the icon in the corner to copy.")
+
+                            with c_del:
+                                if st.button("🗑️", key=f"rm_{mod['modId']}", help="Delete from Library", use_container_width=True):
+                                    idx = DB['mod_library'].index(mod)
+                                    DB['mod_library'].pop(idx)
+                                    save_db(DB)
+                                    st.rerun()
+                
+                with tab_import:
+                    st.subheader("Batch Importer")
+                    st.caption("Paste a full JSON file or a list of mods. We will extract every mod block and save it to your library.")
+                    import_text = st.text_area("Paste JSON Here", height=300)
+                    
+                    if st.button("Process & Import Mods", type="primary"):
+                        try:
+                            pattern = r'\{[^{}]*"modId"[^{}]*\}'
+                            matches = re.findall(pattern, import_text, re.DOTALL)
+                            count_added = 0
+                            existing_ids = [m['modId'] for m in DB['mod_library']]
+                            for match in matches:
+                                try:
+                                    mod_obj = json.loads(match)
+                                    mid = mod_obj.get("modId")
+                                    mname = mod_obj.get("name", "Unknown Imported Mod")
+                                    mver = mod_obj.get("version", "")
+                                    if mid and mid not in existing_ids:
+                                        DB['mod_library'].append({"modId": mid, "name": mname, "version": mver})
+                                        existing_ids.append(mid)
+                                        count_added += 1
+                                except: pass
+                            if count_added > 0:
+                                save_db(DB)
+                                st.success(f"Successfully imported {count_added} new mods to Library!")
+                                st.rerun()
+                            else: st.warning("No new mods found (or all were duplicates).")
+                        except Exception as e: st.error(f"Error processing text: {e}")
