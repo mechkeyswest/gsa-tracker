@@ -27,7 +27,7 @@ def load_db():
             "tutorials": [],
             "announcements": [],
             "mod_library": [],
-            "server_configs": [] # NEW: Stores saved full JSONs
+            "server_configs": [] 
         }
         with open(DB_FILE, 'w') as f:
             json.dump(default_data, f)
@@ -399,4 +399,99 @@ elif st.session_state.page == "json_editor":
                     if st.button("💾 Save as Preset") and new_conf_name:
                         # Remove existing with same name if exists (overwrite)
                         DB['server_configs'] = [c for c in DB['server_configs'] if c['name'] != new_conf_name]
-                        DB['server_configs
+                        DB['server_configs'].append({"name": new_conf_name, "content": st.session_state.editor_content})
+                        save_db(DB)
+                        st.success(f"Saved '{new_conf_name}'!")
+                        st.rerun()
+                
+                if selected_conf != "Select...":
+                    if st.button("🗑️ Delete Selected Preset"):
+                        DB['server_configs'] = [c for c in DB['server_configs'] if c['name'] != selected_conf]
+                        save_db(DB)
+                        st.success("Deleted.")
+                        st.rerun()
+
+            st.divider()
+            st.subheader("Active JSON Editor")
+            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
+            st.session_state.editor_content = json_text
+
+        with col_tools:
+            tab_search, tab_saved = st.tabs(["🌐 Search Workshop", "💾 Saved Library"])
+            
+            with tab_search:
+                st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
+                search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
+                if search_term:
+                    st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
+                
+                st.divider()
+                st.write("**2. Paste Workshop URL**")
+                fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
+                
+                if st.button("🚀 Fetch Details"):
+                    if fetch_url:
+                        mid, mname, mimg, mver = fetch_mod_details(fetch_url)
+                        if mname:
+                            st.session_state.fetched_mod = {
+                                "modId": mid, "name": mname, "version": mver, "image_url": mimg
+                            }
+                            st.success("Found!")
+                        else: st.error("Could not find mod. Check URL.")
+                
+                if st.session_state.fetched_mod:
+                    mod = st.session_state.fetched_mod
+                    with st.container(border=True):
+                        if mod['image_url']: st.image(mod['image_url'])
+                        st.subheader(mod['name'])
+                        
+                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                        st.code(json.dumps(clean_mod, indent=4), language='json')
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("💾 Save to Library"):
+                                DB['mod_library'].append(mod)
+                                save_db(DB)
+                                st.success("Saved!")
+                        with c2:
+                            if st.button("➕ Add to Editor"):
+                                snippet = json.dumps(clean_mod, indent=4)
+                                cur = st.session_state.editor_content.strip()
+                                if not cur: cur = "[]"
+                                if cur.endswith("]"): 
+                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                    else: new_s = "[\n" + snippet + "\n]"
+                                else: new_s = cur + ",\n" + snippet
+                                st.session_state.editor_content = new_s
+                                st.rerun()
+
+            with tab_saved:
+                lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
+                filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
+                
+                if not filtered: st.info("No saved mods.")
+                for mod in filtered:
+                    with st.container(border=True):
+                        st.write(f"**{mod['name']}**")
+                        mini_json = {"modId": mod['modId'], "name": mod['name'], "version": ""}
+                        st.code(json.dumps(mini_json, indent=4), language='json')
+                        
+                        c_ins, c_del = st.columns([3,1])
+                        with c_ins:
+                            if st.button("➕ Insert", key=f"ins_{mod['modId']}"):
+                                snippet = json.dumps(mini_json, indent=4)
+                                cur = st.session_state.editor_content.strip()
+                                if not cur: cur = "[]"
+                                if cur.endswith("]"): 
+                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                    else: new_s = "[\n" + snippet + "\n]"
+                                else: new_s = cur + ",\n" + snippet
+                                st.session_state.editor_content = new_s
+                                st.rerun()
+                        with c_del:
+                            if st.button("🗑️", key=f"rm_{mod['modId']}"):
+                                idx = DB['mod_library'].index(mod)
+                                DB['mod_library'].pop(idx)
+                                save_db(DB)
+                                st.rerun()
