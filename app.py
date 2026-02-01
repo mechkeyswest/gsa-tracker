@@ -31,16 +31,13 @@ def load_db():
         with open(DB_FILE, 'w') as f:
             json.dump(default_data, f)
         return default_data
-    
     try:
         with open(DB_FILE, 'r') as f:
             data = json.load(f)
-            # Ensure keys exist
             if "usernames" not in data: data["usernames"] = {}
             if "mod_library" not in data: data["mod_library"] = []
             return data
-    except json.JSONDecodeError:
-        return {} 
+    except json.JSONDecodeError: return {} 
 
 def save_db(data):
     with open(DB_FILE, 'w') as f:
@@ -48,56 +45,51 @@ def save_db(data):
 
 DB = load_db()
 
-# --- HELPER: WORKSHOP SCRAPER (UPDATED FOR IMAGES) ---
+# --- HELPER: WORKSHOP SCRAPER ---
 def fetch_mod_details(mod_input):
     """
-    Fetches Name, Version, and IMAGE from Arma Reforger Workshop.
+    Fetches Name, Version, and IMAGE from Arma Reforger Workshop URL.
     """
     mod_id = mod_input.strip()
     if "reforger.armaplatform.com/workshop/" in mod_id:
         try:
             mod_id = mod_id.split("workshop/")[1].split("-")[0]
-        except:
-            return None, None, None, "Invalid URL format"
+        except: return None, None, None, "Invalid URL format"
     
     url = f"https://reforger.armaplatform.com/workshop/{mod_id}"
     
     try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
+        headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url, headers=headers, timeout=5)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
             
-            # 1. Title
+            # 1. Scrape Title
             title_tag = soup.find("meta", property="og:title")
             mod_name = title_tag["content"] if title_tag else "Unknown Mod"
             
-            # 2. Image
+            # 2. Scrape Image
             img_tag = soup.find("meta", property="og:image")
             mod_img = img_tag["content"] if img_tag else None
             
-            # 3. Version (Best Guess / Default)
+            # 3. Default Version
             mod_version = "1.0.0" 
             
             return mod_id, mod_name, mod_img, mod_version
         else:
-            return mod_id, None, None, f"Status {response.status_code}"
-            
+            return mod_id, None, None, f"Error: {response.status_code}"
     except Exception as e:
         return mod_id, None, None, str(e)
 
 # --- LOCAL SESSION STATE ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-if "current_user" not in st.session_state:
-    st.session_state.current_user = None
-if "page" not in st.session_state:
-    st.session_state.page = "view_announcements"
-if "selected_mod_id" not in st.session_state:
-    st.session_state.selected_mod_id = None
-if "editor_content" not in st.session_state:
-    st.session_state.editor_content = "[\n\n]"
+if "logged_in" not in st.session_state: st.session_state.logged_in = False
+if "current_user" not in st.session_state: st.session_state.current_user = None
+if "page" not in st.session_state: st.session_state.page = "view_announcements"
+if "selected_mod_id" not in st.session_state: st.session_state.selected_mod_id = None
+if "editor_content" not in st.session_state: st.session_state.editor_content = "[\n\n]"
+# New State for Search
+if "fetched_mod" not in st.session_state: st.session_state.fetched_mod = None
 
 # --- CSS ---
 st.markdown("""
@@ -191,7 +183,7 @@ if user_role in ["CLPLEAD", "SUPER_ADMIN", "CLP"]:
 if user_role == "SUPER_ADMIN":
     st.sidebar.divider()
     st.sidebar.button("🔑 Assign Roles", on_click=navigate_to, args=("roles",))
-    st.sidebar.button("📝 JSON Editor", on_click=navigate_to, args=("json_editor",))
+    st.sidebar.button("📝 Mod Studio", on_click=navigate_to, args=("json_editor",))
 
 # --- TOP NAV ---
 if user_role != "staff":
@@ -384,124 +376,112 @@ elif st.session_state.page == "roles":
             else: st.error("User not found.")
     st.table(pd.DataFrame(DB['role_db'].items(), columns=["Email", "Role"]))
 
-# --- JSON EDITOR / MOD MANAGER PAGE ---
+# --- MOD STUDIO (SEARCH & FETCH UPGRADED) ---
 elif st.session_state.page == "json_editor":
     st.title("📝 Mod Configuration Studio")
     if user_role != "SUPER_ADMIN":
         st.error("Access Denied.")
     else:
-        col_editor, col_library = st.columns([2, 1])
+        # Layout: Left = Editor, Right = Tools
+        col_editor, col_tools = st.columns([2, 1])
         
         with col_editor:
-            st.subheader("Config Editor")
-            st.caption("Construct your server 'mods' array here.")
-            json_text = st.text_area("JSON Output", value=st.session_state.editor_content, height=600, key="main_json_editor")
+            st.subheader("Config.json Editor")
+            st.caption("Copy your JSON here to save/edit.")
+            json_text = st.text_area("Server Config", value=st.session_state.editor_content, height=700, key="main_json_editor")
             st.session_state.editor_content = json_text
 
-        with col_library:
-            st.subheader("📦 Mod Library")
+        with col_tools:
+            # TABS: Search / Saved
+            tab_search, tab_saved = st.tabs(["🌐 Search Workshop", "💾 Saved Library"])
             
-            # SEARCH BAR
-            search_query = st.text_input("🔍 Search Library", placeholder="Type mod name...").lower()
-            
-            tab_lib, tab_import = st.tabs(["Saved Mods", "Import/Fetch"])
-            
-            # --- TAB: SAVED MODS ---
-            with tab_lib:
-                # Filter mods based on search
-                filtered_mods = [
-                    m for m in DB['mod_library'] 
-                    if search_query in m.get('name', '').lower() 
-                    or search_query in m.get('modId', '').lower()
-                ]
+            # --- TAB 1: WORKSHOP SEARCH ---
+            with tab_search:
+                st.info("💡 **Tip:** Type a name to find the link, then Paste the URL to fetch data.")
                 
-                if not filtered_mods:
-                    if search_query: st.info("No mods found.")
-                    else: st.info("Library is empty.")
-                else:
-                    for mod in filtered_mods:
-                        with st.container(border=True):
-                            # Display Image if available
-                            if mod.get('image_url'):
-                                st.image(mod['image_url'], use_container_width=True)
-                            
-                            st.write(f"**{mod.get('name', 'Unknown')}**")
-                            st.caption(f"v{mod.get('version')}")
-                            
-                            # DISPLAY CODE BLOCK (This enables the COPY button)
-                            # We create a clean dictionary for the copy paste
-                            clean_mod = {
-                                "modId": mod.get('modId'),
-                                "name": mod.get('name'),
-                                "version": mod.get('version')
-                            }
-                            st.code(json.dumps(clean_mod, indent=4), language='json')
-                            
-                            c_add, c_del = st.columns([3, 1])
-                            with c_add:
-                                if st.button("➕ Insert to Editor", key=f"add_{mod['modId']}"):
-                                    try:
-                                        current_str = st.session_state.editor_content.strip()
-                                        if not current_str: current_str = "[]"
-                                        new_snippet = json.dumps(clean_mod, indent=4)
-                                        if current_str.endswith("]"):
-                                            if len(current_str) > 2: updated_str = current_str[:-1] + ",\n" + new_snippet + "\n]"
-                                            else: updated_str = "[\n" + new_snippet + "\n]"
-                                        else: updated_str = current_str + ",\n" + new_snippet
-                                        st.session_state.editor_content = updated_str
-                                        st.rerun()
-                                    except: pass
-                            with c_del:
-                                if st.button("🗑️", key=f"del_{mod['modId']}"):
-                                    # Find index in main DB list (not filtered list)
-                                    real_idx = DB['mod_library'].index(mod)
-                                    DB['mod_library'].pop(real_idx)
-                                    save_db(DB)
-                                    st.rerun()
-
-            # --- TAB: IMPORT / FETCH ---
-            with tab_import:
-                st.write("**Fetch from Workshop**")
-                search_input = st.text_input("Workshop ID or URL", placeholder="59673B6FBB95459F")
-                if st.button("🔍 Fetch & Save"):
-                    if search_input:
-                        mid, mname, mimg, mver = fetch_mod_details(search_input)
-                        if mname:
-                            new_mod = {"modId": mid, "name": mname, "version": mver, "image_url": mimg}
-                            DB['mod_library'].append(new_mod)
-                            save_db(DB)
-                            st.success(f"Saved: {mname}")
-                        else:
-                            st.error(f"Error: {mver}")
-                            st.warning("Could not scrape. Enter manually below.")
-                
-                with st.expander("Manual Entry"):
-                    m_id = st.text_input("Mod ID")
-                    m_name = st.text_input("Mod Name")
-                    m_ver = st.text_input("Version", value="1.0.0")
-                    if st.button("Save Manual"):
-                        if m_id and m_name:
-                            DB['mod_library'].append({"modId": m_id, "name": m_name, "version": m_ver})
-                            save_db(DB)
-                            st.success("Saved!")
-                            st.rerun()
+                # 1. SMART SEARCH
+                search_term = st.text_input("1. Search Term", placeholder="e.g. RHS Status Quo")
+                if search_term:
+                    # Generates a button that opens the OFFICIAL search page
+                    st.link_button(f"🌐 Open Search: '{search_term}'", f"https://reforger.armaplatform.com/workshop?search={search_term}")
                 
                 st.divider()
-                st.write("**Batch Paste**")
-                batch_text = st.text_area("Paste existing JSON blob", height=150)
-                if st.button("Process Batch"):
-                    try:
-                        matches = re.findall(r'\{[^{}]*"modId"[^{}]*\}', batch_text, re.DOTALL)
-                        count = 0
-                        for match in matches:
-                            try:
-                                mod_obj = json.loads(match)
-                                if "modId" in mod_obj:
-                                    DB['mod_library'].append(mod_obj)
-                                    count += 1
-                            except: pass
-                        if count > 0:
-                            save_db(DB)
-                            st.success(f"Imported {count} mods!")
-                            st.rerun()
-                    except Exception as e: st.error(str(e))
+                
+                # 2. QUICK FETCH
+                st.write("**2. Paste Workshop URL**")
+                fetch_url = st.text_input("Paste URL here to auto-fetch", placeholder="https://reforger.armaplatform.com/workshop/...")
+                
+                if st.button("🚀 Fetch Details"):
+                    if fetch_url:
+                        mid, mname, mimg, mver = fetch_mod_details(fetch_url)
+                        if mname:
+                            # Save to state to show preview
+                            st.session_state.fetched_mod = {
+                                "modId": mid, "name": mname, "version": mver, "image_url": mimg
+                            }
+                            st.success("Found!")
+                        else:
+                            st.error("Could not find mod. Check URL.")
+                
+                # 3. RESULT PREVIEW & ADD
+                if st.session_state.fetched_mod:
+                    mod = st.session_state.fetched_mod
+                    with st.container(border=True):
+                        if mod['image_url']: st.image(mod['image_url'])
+                        st.subheader(mod['name'])
+                        st.caption(f"ID: {mod['modId']} | v{mod['version']}")
+                        
+                        # CLEAN JSON FOR COPY
+                        clean_mod = {"modId": mod['modId'], "name": mod['name'], "version": mod['version']}
+                        st.code(json.dumps(clean_mod, indent=4), language='json')
+                        
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            if st.button("💾 Save to Library"):
+                                DB['mod_library'].append(mod)
+                                save_db(DB)
+                                st.success("Saved!")
+                        with c2:
+                            if st.button("➕ Add to Editor"):
+                                snippet = json.dumps(clean_mod, indent=4)
+                                cur = st.session_state.editor_content.strip()
+                                if not cur: cur = "[]"
+                                if cur.endswith("]"): 
+                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                    else: new_s = "[\n" + snippet + "\n]"
+                                else: new_s = cur + ",\n" + snippet
+                                st.session_state.editor_content = new_s
+                                st.rerun()
+
+            # --- TAB 2: SAVED LIBRARY ---
+            with tab_saved:
+                lib_search = st.text_input("Filter Library", placeholder="Filter by name...")
+                
+                filtered = [m for m in DB['mod_library'] if lib_search.lower() in m.get('name','').lower()]
+                
+                if not filtered: st.info("No saved mods.")
+                for mod in filtered:
+                    with st.container(border=True):
+                        st.write(f"**{mod['name']}**")
+                        # Mini JSON for Copy
+                        mini_json = {"modId": mod['modId'], "name": mod['name'], "version": mod['version']}
+                        st.code(json.dumps(mini_json, indent=4), language='json')
+                        
+                        c_ins, c_del = st.columns([3,1])
+                        with c_ins:
+                            if st.button("➕ Insert", key=f"ins_{mod['modId']}"):
+                                snippet = json.dumps(mini_json, indent=4)
+                                cur = st.session_state.editor_content.strip()
+                                if not cur: cur = "[]"
+                                if cur.endswith("]"): 
+                                    if len(cur) > 2: new_s = cur[:-1] + ",\n" + snippet + "\n]"
+                                    else: new_s = "[\n" + snippet + "\n]"
+                                else: new_s = cur + ",\n" + snippet
+                                st.session_state.editor_content = new_s
+                                st.rerun()
+                        with c_del:
+                            if st.button("🗑️", key=f"rm_{mod['modId']}"):
+                                idx = DB['mod_library'].index(mod)
+                                DB['mod_library'].pop(idx)
+                                save_db(DB)
+                                st.rerun()
