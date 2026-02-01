@@ -7,165 +7,215 @@ from PIL import Image
 import hashlib
 
 # --- 1. DATABASE SETUP ---
-conn = sqlite3.connect('gsa_workspace_v12.db', check_same_thread=False)
+conn = sqlite3.connect('gsa_workspace_v13.db', check_same_thread=False)
 c = conn.cursor()
+# Tables for hierarchy
 c.execute('CREATE TABLE IF NOT EXISTS users (email TEXT UNIQUE, password TEXT, username TEXT, role TEXT)')
-c.execute('CREATE TABLE IF NOT EXISTS categories (name TEXT UNIQUE, role_required TEXT, sort_order INTEGER)')
-c.execute('''CREATE TABLE IF NOT EXISTS projects 
-             (id INTEGER PRIMARY KEY, category TEXT, title TEXT, details TEXT, 
-              assigned_user TEXT, is_done INTEGER, importance TEXT, image_data TEXT)''')
-c.execute('''CREATE TABLE IF NOT EXISTS comments 
-             (project_id INTEGER, user TEXT, message TEXT, timestamp TEXT, image_data TEXT)''')
+c.execute('CREATE TABLE IF NOT EXISTS categories (id INTEGER PRIMARY KEY, name TEXT, role_locked TEXT, sort_order INTEGER)')
+c.execute('CREATE TABLE IF NOT EXISTS sub_channels (id INTEGER PRIMARY KEY, cat_id INTEGER, name TEXT, type TEXT)') # type: task, calendar, tutorial, thread
+c.execute('''CREATE TABLE IF NOT EXISTS entries 
+             (id INTEGER PRIMARY KEY, channel_id INTEGER, title TEXT, content TEXT, 
+              author TEXT, importance TEXT, image_data TEXT, date_val TEXT, is_done INTEGER)''')
+c.execute('CREATE TABLE IF NOT EXISTS comments (entry_id INTEGER, user TEXT, message TEXT, timestamp TEXT)')
 conn.commit()
 
-# --- 2. CSS & LIGHTBOX EFFECT ---
-st.set_page_config(page_title="GSA Workspace", layout="wide", initial_sidebar_state="expanded")
+# --- 2. INITIALIZE DISCORD-STYLE STRUCTURE ---
+def init_structure():
+    # Top Level Categories
+    struct = [
+        ("Server 1", "Server Admin", [("Mods to Create", "task"), ("Broken Mods", "task")]),
+        ("Server 2", "Server Admin", [("Mods to Create", "task"), ("Broken Mods", "task")]),
+        ("Competitive Lead", "Competitive Lead", [
+            ("Player Repository", "thread"), 
+            ("Training Schedules", "calendar"), 
+            ("Training Tutorials", "tutorial"),
+            ("Training Objectives", "task")
+        ]),
+        ("Pathfinders", "Pathfinders", [("Field Reports", "task")]),
+        ("Media Team", "Media Team", [("Production Queue", "task")])
+    ]
+    for i, (cat, role, subs) in enumerate(struct):
+        c.execute("INSERT OR IGNORE INTO categories (name, role_locked, sort_order) VALUES (?,?,?)", (cat, role, i))
+        cat_id = c.execute("SELECT id FROM categories WHERE name=?", (cat,)).fetchone()[0]
+        for sub_name, sub_type in subs:
+            c.execute("INSERT OR IGNORE INTO sub_channels (cat_id, name, type) VALUES (?,?,?)", (cat_id, sub_name, sub_type))
+    conn.commit()
+
+init_structure()
+
+# --- 3. CSS: DISCORD THEME & HIERARCHY ---
+st.set_page_config(page_title="GSA Command", layout="wide", initial_sidebar_state="expanded")
 st.markdown("""
 <style>
     .main .block-container { max-width: 100vw !important; padding: 1rem 2rem !important; }
-    .status-light { height: 8px; width: 8px; border-radius: 50%; display: inline-block; margin-right: 12px; box-shadow: 0 0 5px currentColor; }
-    .light-low      { color: #0088ff; background-color: #0088ff; }
-    .light-medium   { color: #00ff88; background-color: #00ff88; }
-    .light-high     { color: #ffaa00; background-color: #ffaa00; }
-    .light-critical { color: #ff4444; background-color: #ff4444; }
+    [data-testid="stSidebar"] { background-color: #0f0f11 !important; border-right: 1px solid #222 !important; }
     
-    [data-testid="stSidebar"] { background-color: #111 !important; border-right: none !important; }
+    /* Category Headers */
+    .cat-header { color: #8e9297; font-size: 12px; font-weight: 700; text-transform: uppercase; margin-top: 20px; padding-left: 10px; }
+    
+    /* Sub-channel styling */
     .stButton>button { 
-        width: 100%; text-align: left !important; 
-        background-color: rgba(255,255,255,0.02) !important; 
-        padding: 12px 15px !important; border: none !important; border-radius: 0px !important;
+        width: 100%; text-align: left !important; background-color: transparent !important; 
+        color: #b9bbbe !important; border: none !important; border-radius: 4px !important;
+        padding: 5px 15px !important; font-size: 15px !important; margin-bottom: 2px;
     }
-    .stButton>button:hover { background-color: #222 !important; }
+    .stButton>button:hover { background-color: #35373c !important; color: #fff !important; }
     
-    /* Image Thumbnail Styling */
-    .thumb-img {
-        border: 1px solid #333;
-        transition: transform 0.2s;
-        cursor: pointer;
-    }
-    .thumb-img:hover { transform: scale(1.05); border-color: #555; }
+    /* Status Lights */
+    .status-light { height: 6px; width: 6px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+    .light-critical { background-color: #ff4444; box-shadow: 0 0 5px #ff4444; }
     
-    .chat-line { padding: 6px 0px; font-size: 18px !important; font-weight: 600; }
-    .timestamp { color: #444; font-size: 11px; margin-left: 10px; }
+    .chat-bubble { background: #2f3136; padding: 10px; border-radius: 8px; margin-bottom: 5px; }
 </style>
 """, unsafe_allow_html=True)
 
-# --- 3. IMAGE UTILITIES (Shrink & Expand) ---
-def process_image(img_file, size=(400, 400)):
-    """Resize image for storage while maintaining aspect ratio."""
-    img = Image.open(img_file)
-    img.thumbnail(size)
-    buffered = BytesIO()
-    img.save(buffered, format="PNG")
-    return base64.b64encode(buffered.getvalue()).decode()
+# --- 4. UTILITIES ---
+def process_img(file):
+    img = Image.open(file)
+    img.thumbnail((500, 500))
+    buf = BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode()
 
-def get_user_color(username):
-    hash_obj = hashlib.md5(username.lower().encode())
-    return f"#{hash_obj.hexdigest()[:6]}"
-
-# --- 4. AUTHENTICATION ---
+# --- 5. AUTHENTICATION ---
 if "logged_in" not in st.session_state: st.session_state.logged_in = False
-if "view" not in st.session_state: st.session_state.view = "home"
-if "show_archived" not in st.session_state: st.session_state.show_archived = False
+if "view_ctx" not in st.session_state: st.session_state.view_ctx = {"chan_id": None, "type": None}
 
 if not st.session_state.logged_in:
     _, col, _ = st.columns([1, 1.2, 1])
     with col:
-        st.markdown("<h2 style='text-align:center; margin-top:15vh;'>GSA ACCESS</h2>", unsafe_allow_html=True)
-        t1, t2 = st.tabs(["SIGN IN", "CREATE ACCOUNT"])
+        st.markdown("<h2 style='text-align:center;'>GSA GATEWAY</h2>", unsafe_allow_html=True)
+        t1, t2 = st.tabs(["SIGN IN", "REGISTER"])
         with t1:
-            le = st.text_input("EMAIL", key="log_e").strip().lower()
-            lp = st.text_input("PASSWORD", type="password", key="log_p")
-            if st.button("UNLOCK", use_container_width=True):
+            le = st.text_input("EMAIL").strip().lower()
+            lp = st.text_input("PASSWORD", type="password")
+            if st.button("UNLOCK"):
                 res = c.execute("SELECT username, role FROM users WHERE email=? AND password=?", (le, lp)).fetchone()
-                if res:
-                    st.session_state.update({"logged_in":True, "user_name":res[0], "role":res[1]})
-                    st.rerun()
+                if res: st.session_state.update({"logged_in": True, "user_name": res[0], "role": res[1]}); st.rerun()
         with t2:
-            nu, ne, np = st.text_input("USERNAME"), st.text_input("EMAIL", key="reg_e").strip().lower(), st.text_input("PASSWORD", type="password", key="reg_p")
-            if st.button("REGISTER"):
+            nu, ne, np = st.text_input("USERNAME"), st.text_input("REG_EMAIL").strip().lower(), st.text_input("REG_PASS", type="password")
+            if st.button("CREATE"):
                 role = "Super Admin" if ne == "armasupplyguy@gmail.com" else "pending"
-                c.execute("INSERT INTO users VALUES (?,?,?,?)", (ne, np, nu, role)); conn.commit(); st.success("Done.")
+                c.execute("INSERT INTO users VALUES (?,?,?,?)", (ne, np, nu, role)); conn.commit(); st.success("Registered.")
     st.stop()
 
-# --- 5. SIDEBAR ---
-is_super = st.session_state.role == "Super Admin"
+# --- 6. SIDEBAR NAV ---
+user_role = st.session_state.role
+is_super = user_role == "Super Admin"
+
 with st.sidebar:
-    st.markdown(f"### ✨ {st.session_state.user_name.lower()}")
-    if st.button("🏠 HOME"): st.session_state.view = "home"; st.rerun()
+    st.markdown(f"### ✨ {st.session_state.user_name}")
+    if st.button("🏠 Home"): st.session_state.view_ctx = {"chan_id": None, "type": "home"}; st.rerun()
+
+    # Determine visibility
+    # Competitive Players can see "Competitive Lead" category but only in read-only mode logic below
+    visible_roles = [user_role]
+    if user_role == "Competitive Player": visible_roles.append("Competitive Lead")
     
-    st.session_state.show_archived = st.toggle("Show Completed Tasks", value=st.session_state.show_archived)
-    archive_status = 1 if st.session_state.show_archived else 0
+    query = "SELECT id, name FROM categories ORDER BY sort_order" if is_super else \
+            f"SELECT id, name FROM categories WHERE role_locked IN ({','.join(['?']*len(visible_roles))}) ORDER BY sort_order"
+    
+    cats = c.execute(query, visible_roles if not is_super else []).fetchall()
 
-    cats = c.execute("SELECT name FROM categories ORDER BY sort_order ASC").fetchall() if is_super else \
-           c.execute("SELECT name FROM categories WHERE role_required=? ORDER BY sort_order ASC", (st.session_state.role,)).fetchall()
-
-    st.divider()
-    for (cat_name,) in cats:
-        with st.expander(cat_name.upper(), expanded=True):
-            projs = c.execute("SELECT id, title, importance FROM projects WHERE category=? AND is_done=?", (cat_name, archive_status)).fetchall()
-            for pid, ptitle, pimp in projs:
-                light = f"light-{pimp.lower()}"
-                c_l, c_b = st.columns([0.15, 0.85])
-                c_l.markdown(f'<div style="margin-top:16px" class="status-light {light}"></div>', unsafe_allow_html=True)
-                if c_b.button(ptitle, key=f"p_{pid}"):
-                    st.session_state.active_id, st.session_state.view = pid, "view_project"; st.rerun()
-            if st.button(f"＋ NEW TASK", key=f"add_{cat_name}"):
-                st.session_state.target_cat, st.session_state.view = cat_name, "create_project"; st.rerun()
+    for cid, cname in cats:
+        st.markdown(f"<div class='cat-header'>{cname}</div>", unsafe_allow_html=True)
+        subs = c.execute("SELECT id, name, type FROM sub_channels WHERE cat_id=?", (cid,)).fetchall()
+        for sid, sname, stype in subs:
+            # Player Portal Naming Logic
+            display_name = f"Portal: {sname}" if user_role == "Competitive Player" else sname
+            if st.button(f"#{display_name}", key=f"chan_{sid}"):
+                st.session_state.view_ctx = {"chan_id": sid, "name": sname, "type": stype}
+                st.rerun()
 
     if is_super:
         st.divider()
-        if st.button("⚙️ ADMIN CONTROL"): st.session_state.view = "admin_panel"; st.rerun()
-    if st.button("🚪 LOGOUT"): st.session_state.logged_in = False; st.rerun()
+        if st.button("⚙️ Admin Settings"): st.session_state.view_ctx = {"type": "admin"}; st.rerun()
+    if st.button("🚪 Logout"): st.session_state.logged_in = False; st.rerun()
 
-# --- 6. VIEWS ---
-if st.session_state.view == "view_project":
-    p = c.execute("SELECT * FROM projects WHERE id=?", (st.session_state.active_id,)).fetchone()
-    if p:
-        col_m, col_c = st.columns([1, 1], gap="large")
-        with col_m:
-            st.markdown(f"<h1>{p[2].lower()}</h1>", unsafe_allow_html=True)
-            
-            # Completion Toggle
-            if st.button("✅ Mark as Completed" if not p[5] else "🔄 Re-open Task"):
-                c.execute("UPDATE projects SET is_done=? WHERE id=?", (0 if p[5] else 1, p[0]))
-                conn.commit(); st.rerun()
+# --- 7. MAIN VIEWS ---
+ctx = st.session_state.view_ctx
+can_edit = user_role in ["Super Admin", "Competitive Lead", "Server Admin"]
 
-            st.write(p[3])
-            if p[7]:
-                st.markdown("### attachments")
-                # Thumbnail display
-                if st.button("🔎 View Full Resolution"):
-                    st.image(f"data:image/png;base64,{p[7]}", use_container_width=True)
-                else:
-                    st.image(f"data:image/png;base64,{p[7]}", width=200)
-
-        with col_c:
-            st.markdown("### discussion")
-            chat_h = st.container(height=500, border=False)
-            with chat_h:
-                msgs = c.execute("SELECT user, message, timestamp FROM comments WHERE project_id=?", (p[0],)).fetchall()
-                for cu, cm, ct in msgs:
-                    st.markdown(f"<div class='chat-line'><b style='color:{get_user_color(cu)}'>{cu.lower()}:</b> {cm} <span class='timestamp'>{ct}</span></div>", unsafe_allow_html=True)
-            with st.form("chat_f", clear_on_submit=True):
-                m = st.text_input("msg", label_visibility="collapsed")
-                if st.form_submit_button("↑") and m:
-                    c.execute("INSERT INTO comments (project_id, user, message, timestamp) VALUES (?,?,?,?)", (p[0], st.session_state.user_name, m, datetime.now().strftime("%H:%M")))
+if ctx["type"] == "task":
+    st.title(f"// {ctx['name']}")
+    if can_edit:
+        with st.expander("＋ New Entry"):
+            with st.form("new_e"):
+                t = st.text_input("Title")
+                sev = st.selectbox("Severity", ["Low", "Medium", "High", "Critical"])
+                d = st.text_area("Details")
+                img = st.file_uploader("Image")
+                if st.form_submit_button("Post"):
+                    b64 = process_img(img) if img else None
+                    c.execute("INSERT INTO entries (channel_id, title, content, author, importance, image_data, is_done) VALUES (?,?,?,?,?,?,0)", 
+                              (ctx["chan_id"], t, d, st.session_state.user_name, sev, b64))
                     conn.commit(); st.rerun()
+    
+    # List tasks
+    items = c.execute("SELECT * FROM entries WHERE channel_id=? AND is_done=0", (ctx["chan_id"],)).fetchall()
+    for item in items:
+        with st.container(border=True):
+            col1, col2 = st.columns([0.8, 0.2])
+            col1.subheader(item[2])
+            if item[6]: st.image(f"data:image/png;base64,{item[6]}", width=200)
+            st.write(item[3])
+            if can_edit and col2.button("Done", key=f"done_{item[0]}"):
+                c.execute("UPDATE entries SET is_done=1 WHERE id=?", (item[0],)); conn.commit(); st.rerun()
 
-elif st.session_state.view == "create_project":
-    st.markdown(f"<h1>new {st.session_state.target_cat.lower()} task</h1>", unsafe_allow_html=True)
-    with st.form("new_task"):
-        t, s = st.text_input("Title"), st.selectbox("Severity", ["Low", "Medium", "High", "Critical"])
-        d, f = st.text_area("Details"), st.file_uploader("Photo", type=['png', 'jpg', 'jpeg'])
-        if st.form_submit_button("Initialize"):
-            b64 = process_image(f) if f else None
-            c.execute("INSERT INTO projects (category, title, details, assigned_user, is_done, importance, image_data) VALUES (?,?,?,?,0,?,?)", (st.session_state.target_cat, t, d, st.session_state.user_name, s, b64))
-            conn.commit(); st.session_state.view = "home"; st.rerun()
+elif ctx["type"] == "calendar":
+    st.title(f"📅 {ctx['name']}")
+    col_cal, col_info = st.columns([1, 1])
+    
+    with col_cal:
+        sel_date = st.date_input("Select Training Date")
+    
+    with col_info:
+        st.markdown(f"### Details for {sel_date}")
+        existing = c.execute("SELECT * FROM entries WHERE channel_id=? AND date_val=?", (ctx["chan_id"], str(sel_date))).fetchone()
+        
+        if can_edit:
+            with st.form("cal_form"):
+                time = st.text_input("Time", value=existing[3].split('|')[0] if existing else "")
+                loc = st.text_input("Location/TZ", value=existing[3].split('|')[1] if existing else "")
+                game = st.text_input("Playing", value=existing[3].split('|')[2] if existing else "")
+                if st.form_submit_button("Save Schedule"):
+                    content = f"{time}|{loc}|{game}"
+                    if existing: c.execute("UPDATE entries SET content=? WHERE id=?", (content, existing[0]))
+                    else: c.execute("INSERT INTO entries (channel_id, date_val, content) VALUES (?,?,?)", (ctx["chan_id"], str(sel_date), content))
+                    conn.commit(); st.rerun()
+        else:
+            if existing:
+                d_parts = existing[3].split('|')
+                st.info(f"**Time:** {d_parts[0]}\n\n**Location:** {d_parts[1]}\n\n**Mission:** {d_parts[2]}")
+            else: st.write("No training scheduled for this date.")
 
-elif st.session_state.view == "admin_panel" and is_super:
-    st.markdown("<h1>control panel</h1>", unsafe_allow_html=True)
-    # [Admin Logic Here - Same as previous version for Users/Categories]
+elif ctx["type"] == "tutorial":
+    st.title(f"📚 {ctx['name']}")
+    if can_edit:
+        if st.button("＋ Create New Tutorial"): st.session_state.making_tut = True
+    
+    tuts = c.execute("SELECT * FROM entries WHERE channel_id=?", (ctx["chan_id"],)).fetchall()
+    for t in tuts:
+        with st.expander(f"📖 {t[2]}"):
+            st.write(t[3])
+            if t[6]: st.image(f"data:image/png;base64,{t[6]}", use_container_width=True)
+
+elif ctx["type"] == "thread":
+    st.title(f"💬 {ctx['name']}")
+    # Discord-style thread list
+    if can_edit:
+        with st.popover("New Discussion Thread"):
+            t_name = st.text_input("Subject (e.g. Player Name)")
+            if st.button("Create"):
+                c.execute("INSERT INTO entries (channel_id, title) VALUES (?,?)", (ctx["chan_id"], t_name))
+                conn.commit(); st.rerun()
+    
+    threads = c.execute("SELECT * FROM entries WHERE channel_id=?", (ctx["chan_id"],)).fetchall()
+    for th in threads:
+        if st.button(f"Thread: {th[2]}", key=f"th_{th[0]}"):
+            st.session_state.active_thread = th[0]
+            st.session_state.view_ctx["type"] = "thread_view"
+            st.rerun()
 
 else:
-    st.markdown("<h1 style='font-weight:200; margin-top:10vh; font-size: 5vw;'>welcome back.</h1>", unsafe_allow_html=True)
+    st.markdown("<h1 style='font-weight:200; margin-top:10vh; font-size: 5vw;'>GSA COMMAND</h1>", unsafe_allow_html=True)
